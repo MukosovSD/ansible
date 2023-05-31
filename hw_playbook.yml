@@ -1,0 +1,42 @@
+- hosts: Mukosov
+  become: true
+  tasks:
+  - name: Update and upgrade apt packages
+    apt:
+      upgrade: yes
+      update_cache: yes
+      cache_valid_time: 86400 
+
+- name: Installing cowsay
+  hosts: Mukosov
+  remote_user: hwmukosov
+  become_method: sudo
+  become: yes
+
+  tasks:
+    - name: Installing cowsay
+      become: yes
+      apt: pkg=cowsay state=present
+
+- name: Installing cmatrix
+  hosts: Mukosov
+  remote_user: hwmukosov
+  become_method: sudo
+  become: yes
+
+  tasks:
+    - name: Installing cmatrix
+      become: yes
+      apt: pkg=cmatrix state=present
+
+
+- name: Install sl
+  hosts: Mukosov
+  remote_user: hwmukosov
+  become_method: sudo
+  become: yes
+
+  tasks:
+    - name: Installing sl
+      become: yes
+      apt: pkg=sl state=present
