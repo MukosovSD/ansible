@@ -1,24 +1,39 @@
 ---
 - name: Install htop on all VMs
   hosts: test_vms
-  become: yes
-  gather_facts: yes
-
+  become: yes  # Для sudo
   tasks:
-    - name: Определение ОС
-      debug:
-        msg: "Это {{ ansible_distribution }}"
+    - name: Ensure EPEL repository is enabled on REDOs
+      ansible.builtin.dnf:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes  # Игнорировать ошибки, если EPEL недоступен
 
-    - name: Установка htop (Ubuntu)
-      package:
+    - name: Update apt cache on Ubuntu
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      ignore_errors: yes  # Игнорировать ошибки, если репозитории недоступны
+
+    - name: Install htop on Ubuntu
+      ansible.builtin.apt:
         name: htop
         state: present
-      when: ansible_distribution == 'Ubuntu'
+      when: ansible_os_family == "Debian"
 
-    - name: Установка EPEL + htop (RedOS/CentOS/RHEL)
-      package:
-        name:
-          - epel-release
-          - htop
+    - name: Install htop on REDOs
+      ansible.builtin.dnf:
+        name: htop
         state: present
-      when: ansible_distribution in ['CentOS', 'Red Hat Enterprise Linux', 'RedOS']
+      when: ansible_os_family == "RedHat"
+
+    - name: Check htop installation
+      ansible.builtin.command: htop --version
+      register: htop_version
+      changed_when: false  # Не отмечать задачу как изменяющую состояние
+      failed_when: false   # Не завершать playbook при ошибке
+
+    - name: Display htop version
+      ansible.builtin.debug:
+        msg: "htop version on {{ inventory_hostname }}: {{ htop_version.stdout | default('htop not installed') }}"
