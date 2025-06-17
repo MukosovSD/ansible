@@ -1,0 +1,5 @@
+- hosts: test_vms
+  name: Test connection to VMs
+  tasks:
+  - name: Ping hosts
+    ansible.builtin.ping:
