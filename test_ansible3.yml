@@ -23,7 +23,7 @@
         service_status: >-
           {{
             'not installed' if service_facts_result.ansible_facts.services is not defined or service_name not in service_facts_result.ansible_facts.services
-            else service_facts_result.ansible_facts.services[service_name].state ~ ' (enabled: ' ~ service_facts_result.ansible_facts.services[service_name].enabled | string ~ ')'
+            else service_facts_result.ansible_facts.services[service_name].state ~ ' (enabled: ' ~ service_facts_result.ansible_facts.services[service_name].enabled | default('unknown') | string ~ ')'
           }}
 
     - name: Display wazuh-agent status
