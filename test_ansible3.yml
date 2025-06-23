@@ -2,6 +2,7 @@
 - name: Check wazuh-agent service status
   hosts: test_vms
   become: yes
+  gather_facts: no  # Отключаем автоматический сбор фактов
   tasks:
     - name: Gather service facts
       ansible.builtin.service_facts:
@@ -14,6 +15,6 @@
             (service_facts.services['wazuh-agent'] is not defined) |
             ternary('not installed',
               service_facts.services['wazuh-agent'].state ~ ' (enabled: ' ~
-              service_facts.services['wazuh-agent'].enabled ~ ')'
+              (service_facts.services['wazuh-agent'].enabled | string) ~ ')'
             )
           }}
