@@ -1,29 +1,31 @@
 ---
 - name: Check wazuh-agent service status
   hosts: test_vms
-  become: yes
+  become: yes  # Для sudo
   tasks:
     - name: Check if wazuh-agent service exists
-      ansible.builtin.command: systemctl is-enabled wazuh-agent
-      register: wazuh_enabled
+      ansible.builtin.command: systemctl list-units --type=service | grep wazuh-agent
+      register: wazuh_exists
       failed_when: false
       changed_when: false
 
     - name: Check wazuh-agent service status
-      ansible.builtin.command: systemctl is-active wazuh-agent
-      register: wazuh_status
-      when: wazuh_enabled.rc == 0
+      ansible.builtin.service:
+        name: wazuh-agent
+        state: started  # Проверяем статус, но не изменяем его
+      register: wazuh_service
       failed_when: false
       changed_when: false
+      when: wazuh_exists.rc == 0  # Выполнять только если служба существует
 
     - name: Display wazuh-agent status
       ansible.builtin.debug:
         msg: >-
-          wazuh-agent on {{ inventory_hostname }} is {{ wazuh_status.stdout | default('unknown') }}
-          (enabled: {{ wazuh_enabled.stdout | default('not installed') }})
-      when: wazuh_enabled.rc == 0
+          wazuh-agent on {{ inventory_hostname }} is {{ wazuh_service.state | default('unknown') }}
+          (enabled: {{ wazuh_service.enabled | default('unknown') }})
+      when: wazuh_exists.rc == 0
 
     - name: Display if wazuh-agent is not installed
       ansible.builtin.debug:
         msg: "wazuh-agent is not installed on {{ inventory_hostname }}"
-      when: wazuh_enabled.rc != 0
+      when: wazuh_exists.rc != 0
