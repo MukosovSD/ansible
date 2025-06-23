@@ -3,31 +3,17 @@
   hosts: test_vms
   become: yes
   tasks:
-    - name: Check if wazuh-agent service exists
-      ansible.builtin.command: >
-        systemctl list-units --type=service | 
-        grep -q 'wazuh-agent'
-      register: wazuh_exists
-      failed_when: false
-      changed_when: false
-
-    - name: Check wazuh-agent service status
-      ansible.builtin.service:
-        name: wazuh-agent
-        state: started
-      register: wazuh_service
-      failed_when: false
-      changed_when: false
-      when: wazuh_exists.rc == 0
+    - name: Gather service facts
+      ansible.builtin.service_facts:
 
     - name: Display wazuh-agent status
       ansible.builtin.debug:
         msg: >-
-          wazuh-agent on {{ inventory_hostname }} is {{ wazuh_service.state | default('unknown') }}
-          (enabled: {{ wazuh_service.enabled | default('unknown') }})
-      when: wazuh_exists.rc == 0
-
-    - name: Display if wazuh-agent is not installed
-      ansible.builtin.debug:
-        msg: "wazuh-agent is not installed on {{ inventory_hostname }}"
-      when: wazuh_exists.rc != 0
+          wazuh-agent on {{ inventory_hostname }} is
+          {{
+            (service_facts.services['wazuh-agent'] is not defined) |
+            ternary('not installed',
+              service_facts.services['wazuh-agent'].state ~ ' (enabled: ' ~
+              service_facts.services['wazuh-agent'].enabled ~ ')'
+            )
+          }}
