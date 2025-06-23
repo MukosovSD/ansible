@@ -12,6 +12,12 @@
       register: service_facts_result
       ignore_errors: yes
 
+    - name: Debug available services
+      ansible.builtin.debug:
+        msg: "Available services on {{ inventory_hostname }}: {{ service_facts_result.ansible_facts.services | default({}) | dictsort | map(attribute='0') | list }}"
+      delegate_to: localhost
+      when: service_facts_result.ansible_facts.services is defined
+
     - name: Set wazuh-agent service status
       ansible.builtin.set_fact:
         service_status: >-
