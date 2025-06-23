@@ -1,8 +1,8 @@
 ---
 - name: Check Wazuh Agent status and presence on Ubuntu and REDOS hosts
-  hosts: all
+  hosts: test_vms
   become: yes
-  gather_facts: yes
+  gather_facts: no
   vars:
     service_name: wazuh-agent
     expected_binaries:
@@ -11,6 +11,11 @@
     package_name: wazuh-agent
 
   tasks:
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+      register: service_facts_result
+      ignore_errors: yes
+
     - name: Check if Wazuh Agent package is installed
       ansible.builtin.package_facts:
         manager: auto
@@ -21,12 +26,6 @@
       ansible.builtin.set_fact:
         wazuh_package_installed: "{{ package_name in ansible_facts.packages }}"
       when: ansible_facts.packages is defined
-
-    - name: Check if Wazuh Agent service exists
-      ansible.builtin.systemd:
-        name: "{{ service_name }}"
-      register: service_status
-      ignore_errors: yes
 
     - name: Check for Wazuh Agent binary files
       ansible.builtin.stat:
@@ -45,12 +44,11 @@
     - name: Collect service and package information
       ansible.builtin.set_fact:
         wazuh_info:
-          hostname: "{{ ansible_hostname }}"
-          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          hostname: "{{ inventory_hostname }}"
+          os: "{{ ansible_distribution | default('unknown') }} {{ ansible_distribution_version | default('unknown') }}"
           package_installed: "{{ wazuh_package_installed | default(false) }}"
-          service_exists: "{{ service_status.state is defined }}"
-          service_enabled: "{{ service_status.status.Enabled | default('unknown') }}"
-          service_running: "{{ service_status.status.ActiveState | default('unknown') }}"
+          service_state: "{{ (service_facts_result.ansible_facts.services[service_name] is not defined) | ternary('not installed', service_facts_result.ansible_facts.services[service_name].state) }}"
+          service_enabled: "{{ (service_facts_result.ansible_facts.services[service_name] is not defined) | ternary('unknown', service_facts_result.ansible_facts.services[service_name].enabled | string) }}"
           version: "{{ wazuh_version.stdout | default('not available') }}"
           binaries_present: "{{ binary_checks.results | selectattr('stat.exists', 'equalto', true) | length == expected_binaries | length }}"
 
@@ -60,9 +58,8 @@
           Wazuh Agent Status Report for {{ wazuh_info.hostname }}:
           OS: {{ wazuh_info.os }}
           Package Installed: {{ wazuh_info.package_installed }}
-          Service Exists: {{ wazuh_info.service_exists }}
+          Service State: {{ wazuh_info.service_state }}
           Service Enabled: {{ wazuh_info.service_enabled }}
-          Service Running: {{ wazuh_info.service_running }}
           Version: {{ wazuh_info.version }}
           All Expected Binaries Present: {{ wazuh_info.binaries_present }}
       delegate_to: localhost
@@ -76,21 +73,7 @@
 
   handlers:
     - name: Restart Wazuh Agent
-      ansible.builtin.systemd:
+      ansible.builtin.service:
         name: "{{ service_name }}"
         state: restarted
-      when: wazuh_info.service_exists and wazuh_info.service_running == 'active'
-
-  templates:
-    wazuh_report.j2: |
-      Wazuh Agent Status Report
-      ========================
-      Hostname: {{ wazuh_info.hostname }}
-      OS: {{ wazuh_info.os }}
-      Package Installed: {{ wazuh_info.package_installed }}
-      Service Exists: {{ wazuh_info.service_exists }}
-      Service Enabled: {{ wazuh_info.service_enabled }}
-      Service Running: {{ wazuh_info.service_running }}
-      Version: {{ wazuh_info.version }}
-      All Expected Binaries Present: {{ wazuh_info.binaries_present }}
-      ========================
+      when: wazuh_info.service_state == 'running' and wazuh_info.service_enabled == 'true'
