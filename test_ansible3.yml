@@ -1,0 +1,18 @@
+---
+- name: Check wazuh-agent service status
+  hosts: test_vms
+  become: yes  # Для sudo, так как проверка службы может требовать привилегий
+  tasks:
+    - name: Get wazuh-agent service status
+      ansible.builtin.service_facts:
+      register: service_facts
+
+    - name: Display wazuh-agent status
+      ansible.builtin.debug:
+        msg: "wazuh-agent on {{ inventory_hostname }} is {{ service_facts.ansible_facts.services['wazuh-agent'].state | default('not installed') }} (enabled: {{ service_facts.ansible_facts.services['wazuh-agent'].enabled | default('unknown') }})"
+      when: "'wazuh-agent' in service_facts.ansible_facts.services"
+
+    - name: Display if wazuh-agent is not installed
+      ansible.builtin.debug:
+        msg: "wazuh-agent is not installed on {{ inventory_hostname }}"
+      when: "'wazuh-agent' not in service_facts.ansible_facts.services"
