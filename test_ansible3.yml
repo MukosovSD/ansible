@@ -16,6 +16,12 @@
       register: service_facts_result
       ignore_errors: yes
 
+    - name: Debug available services
+      ansible.builtin.debug:
+        msg: "Available services on {{ inventory_hostname }}: {{ service_facts_result.ansible_facts.services | default({}) | dictsort | map(attribute='0') | list }}"
+      delegate_to: localhost
+      when: service_facts_result.ansible_facts.services is defined
+
     - name: Check if Wazuh Agent package is installed
       ansible.builtin.package_facts:
         manager: auto
@@ -67,8 +73,8 @@
           hostname: "{{ inventory_hostname }}"
           os: "{{ ansible_distribution | default('unknown') }} {{ ansible_distribution_version | default('unknown') }}"
           package_installed: "{{ wazuh_package_installed | default('False') }}"
-          service_state: "{{ (service_facts_result.ansible_facts.services[service_name] is not defined) | ternary('not installed', service_facts_result.ansible_facts.services[service_name].state) }}"
-          service_enabled: "{{ (service_facts_result.ansible_facts.services[service_name] is not defined) | ternary('unknown', service_facts_result.ansible_facts.services[service_name].enabled | string) }}"
+          service_state: "{{ 'not installed' if service_facts_result.ansible_facts.services is not defined or service_name not in service_facts_result.ansible_facts.services else service_facts_result.ansible_facts.services[service_name].state }}"
+          service_enabled: "{{ 'unknown' if service_facts_result.ansible_facts.services is not defined or service_name not in service_facts_result.ansible_facts.services else service_facts_result.ansible_facts.services[service_name].enabled | string }}"
           version: "{{ wazuh_version.stdout | default('not available') }}"
           binaries_present: "{{ binary_checks.results | selectattr('stat.exists', 'equalto', true) | length == expected_binaries | length }}"
 
