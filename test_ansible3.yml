@@ -1,10 +1,12 @@
 ---
 - name: Check wazuh-agent service status
   hosts: test_vms
-  become: yes  # Для sudo
+  become: yes
   tasks:
     - name: Check if wazuh-agent service exists
-      ansible.builtin.command: systemctl list-units --type=service | grep wazuh-agent
+      ansible.builtin.command: >
+        systemctl list-units --type=service | 
+        grep -q 'wazuh-agent'
       register: wazuh_exists
       failed_when: false
       changed_when: false
@@ -12,11 +14,11 @@
     - name: Check wazuh-agent service status
       ansible.builtin.service:
         name: wazuh-agent
-        state: started  # Проверяем статус, но не изменяем его
+        state: started
       register: wazuh_service
       failed_when: false
       changed_when: false
-      when: wazuh_exists.rc == 0  # Выполнять только если служба существует
+      when: wazuh_exists.rc == 0
 
     - name: Display wazuh-agent status
       ansible.builtin.debug:
