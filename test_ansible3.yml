@@ -27,12 +27,26 @@
         wazuh_package_installed: "{{ package_name in ansible_facts.packages }}"
       when: ansible_facts.packages is defined
 
+    - name: Debug package installation status
+      ansible.builtin.debug:
+        msg: "Wazuh package installed on {{ inventory_hostname }}: {{ wazuh_package_installed | default('False') }}"
+      delegate_to: localhost
+
     - name: Check for Wazuh Agent binary files
       ansible.builtin.stat:
         path: "{{ item }}"
       loop: "{{ expected_binaries }}"
       register: binary_checks
       ignore_errors: yes
+      failed_when: false
+      changed_when: false
+
+    - name: Debug binary checks
+      ansible.builtin.debug:
+        msg: "Checking binary {{ item.item }} on {{ inventory_hostname }}: exists={{ item.stat.exists | default('False') }}"
+      loop: "{{ binary_checks.results }}"
+      when: binary_checks.results is defined
+      delegate_to: localhost
 
     - name: Gather Wazuh Agent version
       ansible.builtin.command: "/var/ossec/bin/wazuh-control info -v"
@@ -41,12 +55,18 @@
       failed_when: false
       when: wazuh_package_installed | default(false)
 
+    - name: Debug Wazuh version
+      ansible.builtin.debug:
+        msg: "Wazuh version on {{ inventory_hostname }}: {{ wazuh_version.stdout | default('not available') }}"
+      when: wazuh_package_installed | default(false)
+      delegate_to: localhost
+
     - name: Collect service and package information
       ansible.builtin.set_fact:
         wazuh_info:
           hostname: "{{ inventory_hostname }}"
           os: "{{ ansible_distribution | default('unknown') }} {{ ansible_distribution_version | default('unknown') }}"
-          package_installed: "{{ wazuh_package_installed | default(false) }}"
+          package_installed: "{{ wazuh_package_installed | default('False') }}"
           service_state: "{{ (service_facts_result.ansible_facts.services[service_name] is not defined) | ternary('not installed', service_facts_result.ansible_facts.services[service_name].state) }}"
           service_enabled: "{{ (service_facts_result.ansible_facts.services[service_name] is not defined) | ternary('unknown', service_facts_result.ansible_facts.services[service_name].enabled | string) }}"
           version: "{{ wazuh_version.stdout | default('not available') }}"
