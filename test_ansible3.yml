@@ -1,14 +1,10 @@
 ---
-- name: Check Wazuh Agent status and presence on Ubuntu and REDOS hosts
+- name: Check wazuh-agent service status
   hosts: test_vms
   become: yes
   gather_facts: no
   vars:
     service_name: wazuh-agent
-    expected_binaries:
-      - /var/ossec/bin/wazuh-control
-      - /var/ossec/bin/wazuh-agentd
-    package_name: wazuh-agent
 
   tasks:
     - name: Gather service facts
@@ -16,90 +12,14 @@
       register: service_facts_result
       ignore_errors: yes
 
-    - name: Debug available services
+    - name: Display wazuh-agent status
       ansible.builtin.debug:
-        msg: "Available services on {{ inventory_hostname }}: {{ service_facts_result.ansible_facts.services | default({}) | dictsort | map(attribute='0') | list }}"
+        msg: >-
+          wazuh-agent on {{ inventory_hostname }} is
+          {{
+            (service_facts_result.ansible_facts.services is not defined or service_name not in service_facts_result.ansible_facts.services) |
+            ternary('not installed',
+                    service_facts_result.ansible_facts.services[service_name].state ~ ' (enabled: ' ~
+                    service_facts_result.ansible_facts.services[service_name].enabled | string ~ ')')
+          }}
       delegate_to: localhost
-      when: service_facts_result.ansible_facts.services is defined
-
-    - name: Check if Wazuh Agent package is installed
-      ansible.builtin.package_facts:
-        manager: auto
-      register: package_facts
-      ignore_errors: yes
-
-    - name: Set fact for package installation status
-      ansible.builtin.set_fact:
-        wazuh_package_installed: "{{ package_name in ansible_facts.packages }}"
-      when: ansible_facts.packages is defined
-
-    - name: Debug package installation status
-      ansible.builtin.debug:
-        msg: "Wazuh package installed on {{ inventory_hostname }}: {{ wazuh_package_installed | default('False') }}"
-      delegate_to: localhost
-
-    - name: Check for Wazuh Agent binary files
-      ansible.builtin.stat:
-        path: "{{ item }}"
-      loop: "{{ expected_binaries }}"
-      register: binary_checks
-      ignore_errors: yes
-      failed_when: false
-      changed_when: false
-
-    - name: Debug binary checks
-      ansible.builtin.debug:
-        msg: "Checking binary {{ item.item }} on {{ inventory_hostname }}: exists={{ item.stat.exists | default('False') }}"
-      loop: "{{ binary_checks.results }}"
-      when: binary_checks.results is defined
-      delegate_to: localhost
-
-    - name: Gather Wazuh Agent version
-      ansible.builtin.command: "/var/ossec/bin/wazuh-control info -v"
-      register: wazuh_version
-      changed_when: false
-      failed_when: false
-      when: wazuh_package_installed | default(false)
-
-    - name: Debug Wazuh version
-      ansible.builtin.debug:
-        msg: "Wazuh version on {{ inventory_hostname }}: {{ wazuh_version.stdout | default('not available') }}"
-      when: wazuh_package_installed | default(false)
-      delegate_to: localhost
-
-    - name: Collect service and package information
-      ansible.builtin.set_fact:
-        wazuh_info:
-          hostname: "{{ inventory_hostname }}"
-          os: "{{ ansible_distribution | default('unknown') }} {{ ansible_distribution_version | default('unknown') }}"
-          package_installed: "{{ wazuh_package_installed | default('False') }}"
-          service_state: "{{ 'not installed' if service_facts_result.ansible_facts.services is not defined or service_name not in service_facts_result.ansible_facts.services else service_facts_result.ansible_facts.services[service_name].state }}"
-          service_enabled: "{{ 'unknown' if service_facts_result.ansible_facts.services is not defined or service_name not in service_facts_result.ansible_facts.services else service_facts_result.ansible_facts.services[service_name].enabled | string }}"
-          version: "{{ wazuh_version.stdout | default('not available') }}"
-          binaries_present: "{{ binary_checks.results | selectattr('stat.exists', 'equalto', true) | length == expected_binaries | length }}"
-
-    - name: Display Wazuh Agent status report
-      ansible.builtin.debug:
-        msg: |
-          Wazuh Agent Status Report for {{ wazuh_info.hostname }}:
-          OS: {{ wazuh_info.os }}
-          Package Installed: {{ wazuh_info.package_installed }}
-          Service State: {{ wazuh_info.service_state }}
-          Service Enabled: {{ wazuh_info.service_enabled }}
-          Version: {{ wazuh_info.version }}
-          All Expected Binaries Present: {{ wazuh_info.binaries_present }}
-      delegate_to: localhost
-
-    - name: Save report to file
-      ansible.builtin.template:
-        src: wazuh_report.j2
-        dest: "/tmp/wazuh_agent_report_{{ wazuh_info.hostname }}.txt"
-        mode: '0644'
-      delegate_to: localhost
-
-  handlers:
-    - name: Restart Wazuh Agent
-      ansible.builtin.service:
-        name: "{{ service_name }}"
-        state: restarted
-      when: wazuh_info.service_state == 'running' and wazuh_info.service_enabled == 'true'
