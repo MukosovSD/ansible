@@ -1,0 +1,66 @@
+---
+- name: Удаление osquery и всех его следов на Ubuntu и RedOS
+  hosts: all
+  become: yes
+  vars:
+    osquery_conf_path: "/etc/osquery"
+    osquery_packs_dir: "/opt/osquery"
+
+  tasks:
+    - name: Отладка - вывод информации о дистрибутиве
+      ansible.builtin.debug:
+        msg: "OS Family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
+      delegate_to: localhost
+
+    - name: Определение дистрибутива ОС
+      ansible.builtin.set_fact:
+        os_family: "{{ ansible_os_family | lower }}"
+        is_redos: "{{ ansible_distribution in ['RED', 'redos'] }}"
+
+    - name: Остановка и отключение службы osqueryd
+      ansible.builtin.systemd:
+        name: osqueryd
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+      when: os_family in ['debian', 'red'] or is_redos
+
+    - name: Удаление пакета osquery на Ubuntu
+      ansible.builtin.apt:
+        name: osquery
+        state: absent
+        purge: yes
+        update_cache: yes
+      when: os_family == 'debian'
+      ignore_errors: yes
+
+    - name: Удаление пакета osquery на RedOS
+      ansible.builtin.dnf:
+        name: osquery
+        state: absent
+      when: os_family == 'red' or is_redos
+      ignore_errors: yes
+
+    - name: Удаление конфигурационной директории /etc/osquery
+      ansible.builtin.file:
+        path: "{{ osquery_conf_path }}"
+        state: absent
+      when: os_family in ['debian', 'red'] or is_redos
+
+    - name: Удаление директории /opt/osquery
+      ansible.builtin.file:
+        path: "{{ osquery_packs_dir }}"
+        state: absent
+      when: os_family in ['debian', 'red'] or is_redos
+
+    - name: Проверка отсутствия osqueryd
+      ansible.builtin.command: which osqueryd
+      register: osquery_check
+      changed_when: false
+      failed_when: false
+      when: os_family in ['debian', 'red'] or is_redos
+
+    - name: Отладка - подтверждение удаления osquery
+      ansible.builtin.debug:
+        msg: "osquery успешно удален на {{ inventory_hostname }}: {{ 'osqueryd не найден' if osquery_check.rc != 0 else 'osqueryd все еще присутствует' }}"
+      delegate_to: localhost
