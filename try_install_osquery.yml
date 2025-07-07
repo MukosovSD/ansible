@@ -3,11 +3,11 @@
   hosts: all
   become: yes
   vars:
-    osquery_version: "5.11.0-1.linux_amd64"
-    osquery_deb: "osquery_{{ osquery_version }}.deb"
-    osquery_rpm: "osquery-{{ osquery_version }}.rpm"
+    osquery_version: "5.17.0-1"  # Обновленная версия
+    osquery_deb: "osquery_{{ osquery_version }}.linux_amd64.deb"
+    osquery_rpm: "osquery-{{ osquery_version }}.linux.x86_64.rpm"
     osquery_deb_url: "https://pkg.osquery.io/deb/{{ osquery_deb }}"
-    osquery_rpm_url: "https://pkg.osquery.io/rpm/{{ osquery_rpm }}"
+    osquery_rpm_url: "https://pkg.osquerypackages.com/rpm/{{ osquery_rpm }}"
     osquery_conf_path: "/etc/osquery/osquery.conf"
     osquery_flags_path: "/etc/osquery/osquery.flags"
     osquery_packs_dir: "/opt/osquery/share/osquery/packs"
@@ -45,6 +45,48 @@
         update_cache: yes
       when: os_family == 'red' or is_redos
 
+    - name: Добавление GPG-ключа osquery для RedOS
+      ansible.builtin.rpm_key:
+        key: https://pkg.osquery.io/rpm/GPG
+        state: present
+      when: os_family == 'red' or is_redos
+
+    - name: Добавление репозитория osquery для RedOS
+      ansible.builtin.yum_repository:
+        name: osquery
+        description: osquery RPM repository
+        baseurl: https://pkg.osquerypackages.com/rpm
+        gpgcheck: yes
+        gpgkey: https://pkg.osquery.io/rpm/GPG
+        enabled: yes
+      when: os_family == 'red' or is_redos
+
+    - name: Установка osquery на RedOS через репозиторий
+      ansible.builtin.dnf:
+        name: osquery
+        state: present
+        update_cache: yes
+      when: os_family == 'red' or is_redos
+      register: rpm_install_repo
+      ignore_errors: yes
+
+    - name: Скачивание пакета osquery для RedOS (fallback)
+      ansible.builtin.get_url:
+        url: "{{ osquery_rpm_url }}"
+        dest: "/tmp/{{ osquery_rpm }}"
+        mode: '0644'
+      when: (os_family == 'red' or is_redos) and rpm_install_repo.failed
+      register: rpm_download
+      ignore_errors: yes
+
+    - name: Установка пакета osquery на RedOS из скачанного файла
+      ansible.builtin.dnf:
+        name: "/tmp/{{ osquery_rpm }}"
+        state: present
+      when: (os_family == 'red' or is_redos) and rpm_download is not failed
+      register: rpm_install_file
+      ignore_errors: yes
+
     - name: Скачивание пакета osquery для Ubuntu
       ansible.builtin.get_url:
         url: "{{ osquery_deb_url }}"
@@ -52,15 +94,6 @@
         mode: '0644'
       when: os_family == 'debian'
       register: deb_download
-      ignore_errors: yes
-
-    - name: Скачивание пакета osquery для RedOS
-      ansible.builtin.get_url:
-        url: "{{ osquery_rpm_url }}"
-        dest: "/tmp/{{ osquery_rpm }}"
-        mode: '0644'
-      when: os_family == 'red' or is_redos
-      register: rpm_download
       ignore_errors: yes
 
     - name: Установка пакета osquery на Ubuntu
@@ -76,14 +109,6 @@
         state: present
         update_cache: yes
       when: os_family == 'debian' and deb_install.failed
-
-    - name: Установка пакета osquery на RedOS
-      ansible.builtin.dnf:
-        name: "/tmp/{{ osquery_rpm }}"
-        state: present
-      when: (os_family == 'red' or is_redos) and rpm_download is not failed
-      register: rpm_install
-      ignore_errors: yes
 
     - name: Проверка установки osquery
       ansible.builtin.command: which osqueryd
