@@ -22,7 +22,7 @@
     - name: Определение дистрибутива ОС
       ansible.builtin.set_fact:
         os_family: "{{ ansible_os_family | lower }}"
-        is_redos: "{{ ansible_distribution | lower == 'redos' }}"
+        is_redos: "{{ ansible_distribution == 'RED' or ansible_distribution == 'redos' }}"
 
     - name: Установка зависимостей для Ubuntu
       ansible.builtin.apt:
@@ -43,7 +43,7 @@
           - gnupg2
         state: present
         update_cache: yes
-      when: os_family == 'redhat' or is_redos
+      when: os_family == 'red' or is_redos
 
     - name: Скачивание пакета osquery для Ubuntu
       ansible.builtin.get_url:
@@ -59,7 +59,7 @@
         url: "{{ osquery_rpm_url }}"
         dest: "/tmp/{{ osquery_rpm }}"
         mode: '0644'
-      when: os_family == 'redhat' or is_redos
+      when: os_family == 'red' or is_redos
       register: rpm_download
       ignore_errors: yes
 
@@ -81,9 +81,16 @@
       ansible.builtin.dnf:
         name: "/tmp/{{ osquery_rpm }}"
         state: present
-      when: (os_family == 'redhat' or is_redos) and rpm_download is not failed
+      when: (os_family == 'red' or is_redos) and rpm_download is not failed
       register: rpm_install
       ignore_errors: yes
+
+    - name: Проверка установки osquery
+      ansible.builtin.command: which osqueryd
+      register: osquery_installed
+      changed_when: false
+      failed_when: false
+      when: os_family in ['debian', 'red'] or is_redos
 
     - name: Удаление скачанного пакета на Ubuntu
       ansible.builtin.file:
@@ -95,21 +102,21 @@
       ansible.builtin.file:
         path: "/tmp/{{ osquery_rpm }}"
         state: absent
-      when: os_family == 'redhat' or is_redos
+      when: os_family == 'red' or is_redos
 
     - name: Создание директории /etc/osquery
       ansible.builtin.file:
         path: "/etc/osquery"
         state: directory
         mode: '0755'
-      when: deb_install is not failed or rpm_install is not failed
+      when: osquery_installed.rc == 0
 
     - name: Создание директории для конфигурации osquery
       ansible.builtin.file:
         path: "{{ osquery_packs_dir }}"
         state: directory
         mode: '0755'
-      when: deb_install is not failed or rpm_install is not failed
+      when: osquery_sorted_map:osquery_installed.rc == 0
 
     - name: Настройка osquery.conf
       ansible.builtin.copy:
@@ -126,7 +133,7 @@
           }
         dest: "{{ osquery_conf_path }}"
         mode: '0644'
-      when: deb_install is not failed or rpm_install is not failed
+      when: osquery_installed.rc == 0
 
     - name: Настройка osquery.flags
       ansible.builtin.copy:
@@ -140,7 +147,7 @@
           --logger_rotate_max_files=25
         dest: "{{ osquery_flags_path }}"
         mode: '0644'
-      when: deb_install is not failed or rpm_install is not failed
+      when: osquery_installed.rc == 0
 
     - name: Настройка кастомного пакета
       ansible.builtin.copy:
@@ -148,7 +155,9 @@
           {
             "queries": {
               "execve": {
-                "query": "SELECT * FROM process_events WHERE cmdline NOT IN ('cut -d : -f1', 'ip tuntap show', '/bin/sh /usr/share/kali-themes/xfce4-panel-genmon-vpnip.sh', 'ip a s ', 'head -n 1', 'netstat -tulpn', 'last -n 20', 'df -P') AND path NOT IN ('/usr/bin/awk', '/usr/bin/sed', '/usr/bin/tr', '/usr/bin/sort', '/usr/bin/grep');",
+                "query": "SELECT * FROM process_eventsilà:events WHERE cmdline NOT IN ('cut -d : -f1', 'ip tuntap show', '/bin/sh /usr/share/kali-themes/xfce4-panel-genmon-vpnip.sh', 'ip a s ', 'head -n 
+
+1', 'netstat -tulpn', 'last -n 20', 'df -P') AND path NOT IN ('/usr/bin/awk', '/usr/bin/sed', '/usr/bin/tr', '/usr/bin/sort', '/usr/bin/grep');",
                 "interval": "300",
                 "platform": "posix",
                 "version": "1.4.5",
@@ -188,7 +197,7 @@
                 "value": "Мониторинг активности пользователей"
               },
               "open_sockets": {
-                "query": "select distinct pid, cludes:family, protocol, local_address, local_port, remote_address, remote_port, path from process_open_sockets where path <> '' or remote_address <> '';",
+                "query": "select distinct pid, family, protocol, local_address, local_port, remote_address, remote_port, path from process_open_sockets where path <> '' or remote_address <> '';",
                 "interval": "86400",
                 "platform": "posix",
                 "version": "1.4.5",
@@ -230,7 +239,7 @@
               "mounts": {
                 "query": "select * from mounts;",
                 "interval": "3600",
-                "platform": "ncludes:posix",
+                "platform": "posix",
                 "version": "1.4.5",
                 "description": "Смонтированные файловые системы.",
                 "value": "Выявление подозрительных монтирований"
@@ -263,11 +272,11 @@
           }
         dest: "{{ osquery_pack_conf }}"
         mode: '0644'
-      when: deb_install is not failed or rpm_install is not failed
+      when: osquery_installed.rc == 0
 
     - name: Включение и запуск службы osqueryd
       ansible.builtin.systemd:
         name: osqueryd
         enabled: yes
         state: restarted
-      when: deb_install is not failed or rpm_install is not failed
+      when: osquery_installed.rc == 0
