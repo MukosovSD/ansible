@@ -1,0 +1,249 @@
+---
+- name: Установка и настройка osquery на Ubuntu и RedOS
+  hosts: all
+  become: yes
+  vars:
+    osquery_version: "5.11.0-1.linux_amd64"
+    osquery_deb: "osquery_{{ osquery_version }}.deb"
+    osquery_rpm: "osquery-{{ osquery_version }}.rpm"
+    osquery_deb_url: "https://pkg.osquery.io/deb/{{ osquery_deb }}"
+    osquery_rpm_url: "https://pkg.osquery.io/rpm/{{ osquery_rpm }}"
+    osquery_conf_path: "/etc/osquery/osquery.conf"
+    osquery_flags_path: "/etc/osquery/osquery.flags"
+    osquery_packs_dir: "/opt/osquery/share/osquery/packs"
+    osquery_pack_conf: "{{ osquery_packs_dir }}/custom_pack.conf"
+
+  tasks:
+    - name: Определение дистрибутива ОС
+      ansible.builtin.set_fact:
+        os_family: "{{ ansible_os_family | lower }}"
+
+    - name: Установка зависимостей для Ubuntu
+      ansible.builtin.apt:
+        name:
+          - wget
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+      when: os_family == 'debian'
+
+    - name: Установка зависимостей для RedOS
+      ansible.builtin.dnf:
+        name:
+          - wget
+          - curl
+          - gnupg2
+        state: present
+        update_cache: yes
+      when: os_family == 'redhat'
+
+    - name: Скачивание пакета osquery для Ubuntu
+      ansible.builtin.get_url:
+        url: "{{ osquery_deb_url }}"
+        dest: "/tmp/{{ osquery_deb }}"
+        mode: '0644'
+      when: os_family == 'debian'
+
+    - name: Скачивание пакета osquery для RedOS
+      ansible.builtin.get_url:
+        url: "{{ osquery_rpm_url }}"
+        dest: "/tmp/{{ osquery_rpm }}"
+        mode: '0644'
+      when: os_family == 'redhat'
+
+    - name: Установка пакета osquery на Ubuntu
+      ansible.builtin.apt:
+        deb: "/tmp/{{ osquery_deb }}"
+      when: os_family == 'debian'
+      register: deb_install
+      ignore_errors: yes
+
+    - name: Исправление зависимостей на Ubuntu
+      ansible.builtin.apt:
+        name: osquery
+        state: present
+        update_cache: yes
+      when: os_family == 'debian' and deb_install.failed
+
+    - name: Установка пакета osquery на RedOS
+      ansible.builtin.dnf:
+        name: "/tmp/{{ osquery_rpm }}"
+        state: present
+      when: os_family == 'redhat'
+
+    - name: Удаление скачанного пакета на Ubuntu
+      ansible.builtin.file:
+        path: "/tmp/{{ osquery_deb }}"
+        state: absent
+      when: os_family == 'debian'
+
+    - name: Удаление скачанного пакета на RedOS
+      ansible.builtin.file:
+        path: "/tmp/{{ osquery_rpm }}"
+        state: absent
+      when: os_family == 'redhat'
+
+    - name: Создание директории для конфигурации osquery
+      ansible.builtin.file:
+        path: "{{ osquery_packs_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Настройка osquery.conf
+      ansible.builtin.copy:
+        content: |
+          {
+            "options": {
+              "config_plugin": "filesystem",
+              "logger_plugin": "filesystem",
+              "utc": "true"
+            },
+            "packs": {
+              "custom-pack": "{{ osquery_pack_conf }}"
+            }
+          }
+        dest: "{{ osquery_conf_path }}"
+        mode: '0644'
+
+    - name: Настройка osquery.flags
+      ansible.builtin.copy:
+        content: |
+          --disable_audit=false
+          --audit_allow_config=true
+          --audit_persist=true
+          --audit_allow_process_events=true
+          --logger_rotate=true
+          --logger_rotate_size=26214400
+          --logger_rotate_max_files=25
+        dest: "{{ osquery_flags_path }}"
+        mode: '0644'
+
+    - name: Настройка кастомного пакета
+      ansible.builtin.copy:
+        content: |
+          {
+            "queries": {
+              "execve": {
+                "query": "SELECT * FROM process_events WHERE cmdline NOT IN ('cut -d : -f1', 'ip tuntap show', '/bin/sh /usr/share/kali-themes/xfce4-panel-genmon-vpnip.sh', 'ip a s ', 'head -n 1', 'netstat -tulpn', 'last -n 20', 'df -P') AND path NOT IN ('/usr/bin/awk', '/usr/bin/sed', '/usr/bin/tr', '/usr/bin/sort', '/usr/bin/grep');",
+                "interval": "300",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Запрос для получения событий процессов каждые 300 секунд",
+                "value": "Выявление вредоносных процессов"
+              },
+              "crontab": {
+                "query": "select * from crontab;",
+                "interval": "60",
+                "platform": "linux",
+                "version": "1.4.5",
+                "description": "Получение всех записей crontab.",
+                "value": "Обнаружение механизмов постоянства"
+              },
+              "etc_hosts": {
+                "query": "select * from etc_hosts;",
+                "interval": "60",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Проверка /etc/hosts на подозрительные перенаправления.",
+                "value": "Обнаружение манипуляций с DNS"
+              },
+              "kernel_modules": {
+                "query": "select * from kernel_modules;",
+                "interval": "7200",
+                "platform": "linux",
+                "version": "1.4.5",
+                "description": "Список модулей ядра.",
+                "value": "Обнаружение вредоносных драйверов"
+              },
+              "last": {
+                "query": "select * from last;",
+                "interval": "60",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Недавние входы в систему.",
+                "value": "Мониторинг активности пользователей"
+              },
+              "open_sockets": {
+                "query": "select distinct pid, family, protocol, local_address, local_port, remote_address, remote_port, path from process_open_sockets where path <> '' or remote_address <> '';",
+                "interval": "86400",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Список открытых сокетов по процессам.",
+                "value": "Обнаружение подозрительных соединений"
+              },
+              "open_files": {
+                "query": "select distinct pid, path from process_open_files where path not like '/private/var/folders%' and path not like '/System/Library/%' and path not in ('/dev/null', '/dev/urandom', '/dev/random');",
+                "interval": "86400",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Открытые файлы по процессам.",
+                "value": "Обнаружение аномалий доступа к файлам"
+              },
+              "logged_in_users": {
+                "query": "select liu.*, p.name, p.cmdline, p.cwd, p.root from logged_in_users liu, processes p where liu.pid = p.pid;",
+                "interval": "60",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Текущие пользовательские сессии.",
+                "value": "Отслеживание активности пользователей"
+              },
+              "ip_forwarding": {
+                "query": "select * from system_controls where oid = '4.30.41.1' union select * from system_controls where oid = '4.2.0.1';",
+                "interval": "86400",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Проверка статуса пересылки IP.",
+                "value": "Обнаружение использования в качестве сетевого реле"
+              },
+              "process_env": {
+                "query": "select * from process_envs;",
+                "interval": "86400",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Переменные окружения процессов.",
+                "value": "Проверка контекста выполнения"
+              },
+              "mounts": {
+                "query": "select * from mounts;",
+                "interval": "3600",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "Смонтированные файловые системы.",
+                "value": "Выявление подозрительных монтирований"
+              },
+              "shell_history": {
+                "query": "select * from users join shell_history using (uid);",
+                "interval": "10",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "История команд оболочки.",
+                "value": "Аудит активности пользователей"
+              },
+              "suid_bin": {
+                "query": "select * from suid_bin;",
+                "interval": "3600",
+                "platform": "posix",
+                "version": "1.4.5",
+                "description": "SUID-бинарники в системе.",
+                "value": "Обнаружение рисков повышения привилегий"
+              },
+              "iptables": {
+                "query": "select * from iptables;",
+                "interval": "3600",
+                "platform": "linux",
+                "version": "1.4.5",
+                "description": "Снимок правил брандмауэра.",
+                "value": "Проверка политик безопасности"
+              }
+            }
+          }
+        dest: "{{ osquery_pack_conf }}"
+        mode: '0644'
+
+    - name: Включение и запуск службы osqueryd
+      ansible.builtin.systemd:
+        name: osqueryd
+        enabled: yes
+        state: restarted
