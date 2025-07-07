@@ -22,7 +22,7 @@
     - name: Определение дистрибутива ОС
       ansible.builtin.set_fact:
         os_family: "{{ ansible_os_family | lower }}"
-        is_redos: "{{ ansible_distribution == 'RED' or ansible_distribution == 'redos' }}"
+        is_redos: "{{ ansible_distribution in ['RED', 'redos'] }}"
 
     - name: Установка зависимостей для Ubuntu
       ansible.builtin.apt:
@@ -116,7 +116,7 @@
         path: "{{ osquery_packs_dir }}"
         state: directory
         mode: '0755'
-      when: osquery_sorted_map:osquery_installed.rc == 0
+      when: osquery_installed.rc == 0
 
     - name: Настройка osquery.conf
       ansible.builtin.copy:
@@ -155,9 +155,7 @@
           {
             "queries": {
               "execve": {
-                "query": "SELECT * FROM process_eventsilà:events WHERE cmdline NOT IN ('cut -d : -f1', 'ip tuntap show', '/bin/sh /usr/share/kali-themes/xfce4-panel-genmon-vpnip.sh', 'ip a s ', 'head -n 
-
-1', 'netstat -tulpn', 'last -n 20', 'df -P') AND path NOT IN ('/usr/bin/awk', '/usr/bin/sed', '/usr/bin/tr', '/usr/bin/sort', '/usr/bin/grep');",
+                "query": "SELECT * FROM process_events WHERE cmdline NOT IN (\"cut -d : -f1\", \"ip tuntap show\", \"/bin/sh /usr/share/kali-themes/xfce4-panel-genmon-vpnip.sh\", \"ip a s\", \"head -n 1\", \"netstat -tulpn\", \"last -n 20\", \"df -P\") AND path NOT IN (\"/usr/bin/awk\", \"/usr/bin/sed\", \"/usr/bin/tr\", \"/usr/bin/sort\", \"/usr/bin/grep\");",
                 "interval": "300",
                 "platform": "posix",
                 "version": "1.4.5",
