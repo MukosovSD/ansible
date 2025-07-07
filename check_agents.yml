@@ -1,0 +1,47 @@
+---
+- name: Проверка установки wazuh-agent и osquery
+  hosts: test_vms
+  become: yes
+  gather_facts: no
+  vars:
+    wazuh_service_name: wazuh-agent.service
+
+  tasks:
+    - name: Сбор информации о сервисах
+      ansible.builtin.service_facts:
+      register: service_facts_result
+      ignore_errors: yes
+
+    - name: Проверка, включён ли wazuh-agent в автозагрузку
+      ansible.builtin.command: systemctl is-enabled {{ wazuh_service_name }}
+      register: service_enabled
+      changed_when: false
+      failed_when: false
+      when: service_facts_result.ansible_facts.services is defined and wazuh_service_name in service_facts_result.ansible_facts.services
+
+    - name: Проверка наличия osqueryd через which
+      ansible.builtin.command: which osqueryd
+      register: osquery_which_result
+      changed_when: false
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Определение статуса wazuh-agent
+      ansible.builtin.set_fact:
+        wazuh_status: >-
+          {{
+            'not installed' if service_facts_result.ansible_facts.services is not defined or wazuh_service_name not in service_facts_result.ansible_facts.services
+            else service_facts_result.ansible_facts.services[wazuh_service_name].state ~ ' (enabled: ' ~ (service_enabled.stdout | default('unknown')) ~ ')'
+          }}
+
+    - name: Определение статуса osquery
+      ansible.builtin.set_fact:
+        osquery_status: "{{ 'installed' if osquery_which_result.stdout is defined else 'not installed' }}"
+
+    - name: Вывод информации о состоянии агентов
+      ansible.builtin.debug:
+        msg: |
+          Состояние на {{ inventory_hostname }}:
+            wazuh-agent: {{ hostvars[inventory_hostname]['wazuh_status'] }}
+            osquery: {{ hostvars[inventory_hostname]['osquery_status'] }}
+      delegate_to: localhost
