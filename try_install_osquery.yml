@@ -14,9 +14,15 @@
     osquery_pack_conf: "{{ osquery_packs_dir }}/custom_pack.conf"
 
   tasks:
+    - name: Отладка - вывод информации о дистрибутиве
+      ansible.builtin.debug:
+        msg: "OS Family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
+      delegate_to: localhost
+
     - name: Определение дистрибутива ОС
       ansible.builtin.set_fact:
         os_family: "{{ ansible_os_family | lower }}"
+        is_redos: "{{ ansible_distribution | lower == 'redos' }}"
 
     - name: Установка зависимостей для Ubuntu
       ansible.builtin.apt:
@@ -37,7 +43,7 @@
           - gnupg2
         state: present
         update_cache: yes
-      when: os_family == 'redhat'
+      when: os_family == 'redhat' or is_redos
 
     - name: Скачивание пакета osquery для Ubuntu
       ansible.builtin.get_url:
@@ -45,18 +51,22 @@
         dest: "/tmp/{{ osquery_deb }}"
         mode: '0644'
       when: os_family == 'debian'
+      register: deb_download
+      ignore_errors: yes
 
     - name: Скачивание пакета osquery для RedOS
       ansible.builtin.get_url:
         url: "{{ osquery_rpm_url }}"
         dest: "/tmp/{{ osquery_rpm }}"
         mode: '0644'
-      when: os_family == 'redhat'
+      when: os_family == 'redhat' or is_redos
+      register: rpm_download
+      ignore_errors: yes
 
     - name: Установка пакета osquery на Ubuntu
       ansible.builtin.apt:
         deb: "/tmp/{{ osquery_deb }}"
-      when: os_family == 'debian'
+      when: os_family == 'debian' and deb_download is not failed
       register: deb_install
       ignore_errors: yes
 
@@ -71,7 +81,9 @@
       ansible.builtin.dnf:
         name: "/tmp/{{ osquery_rpm }}"
         state: present
-      when: os_family == 'redhat'
+      when: (os_family == 'redhat' or is_redos) and rpm_download is not failed
+      register: rpm_install
+      ignore_errors: yes
 
     - name: Удаление скачанного пакета на Ubuntu
       ansible.builtin.file:
@@ -83,13 +95,21 @@
       ansible.builtin.file:
         path: "/tmp/{{ osquery_rpm }}"
         state: absent
-      when: os_family == 'redhat'
+      when: os_family == 'redhat' or is_redos
+
+    - name: Создание директории /etc/osquery
+      ansible.builtin.file:
+        path: "/etc/osquery"
+        state: directory
+        mode: '0755'
+      when: deb_install is not failed or rpm_install is not failed
 
     - name: Создание директории для конфигурации osquery
       ansible.builtin.file:
         path: "{{ osquery_packs_dir }}"
         state: directory
         mode: '0755'
+      when: deb_install is not failed or rpm_install is not failed
 
     - name: Настройка osquery.conf
       ansible.builtin.copy:
@@ -106,6 +126,7 @@
           }
         dest: "{{ osquery_conf_path }}"
         mode: '0644'
+      when: deb_install is not failed or rpm_install is not failed
 
     - name: Настройка osquery.flags
       ansible.builtin.copy:
@@ -119,6 +140,7 @@
           --logger_rotate_max_files=25
         dest: "{{ osquery_flags_path }}"
         mode: '0644'
+      when: deb_install is not failed or rpm_install is not failed
 
     - name: Настройка кастомного пакета
       ansible.builtin.copy:
@@ -166,7 +188,7 @@
                 "value": "Мониторинг активности пользователей"
               },
               "open_sockets": {
-                "query": "select distinct pid, family, protocol, local_address, local_port, remote_address, remote_port, path from process_open_sockets where path <> '' or remote_address <> '';",
+                "query": "select distinct pid, cludes:family, protocol, local_address, local_port, remote_address, remote_port, path from process_open_sockets where path <> '' or remote_address <> '';",
                 "interval": "86400",
                 "platform": "posix",
                 "version": "1.4.5",
@@ -208,7 +230,7 @@
               "mounts": {
                 "query": "select * from mounts;",
                 "interval": "3600",
-                "platform": "posix",
+                "platform": "ncludes:posix",
                 "version": "1.4.5",
                 "description": "Смонтированные файловые системы.",
                 "value": "Выявление подозрительных монтирований"
@@ -241,9 +263,11 @@
           }
         dest: "{{ osquery_pack_conf }}"
         mode: '0644'
+      when: deb_install is not failed or rpm_install is not failed
 
     - name: Включение и запуск службы osqueryd
       ansible.builtin.systemd:
         name: osqueryd
         enabled: yes
         state: restarted
+      when: deb_install is not failed or rpm_install is not failed
