@@ -1,0 +1,220 @@
+---
+- name: Install osquery and Wazuh on Ubuntu and RedOS
+  hosts: test_deploy_wazuh_agent
+  become: yes
+  vars:
+    osquery_version: "5.17.0-1"
+    osquery_deb: "osquery_{{ osquery_version }}.linux_amd64.deb"
+    osquery_rpm: "osquery-{{ osquery_version }}.linux.x86_64.rpm"
+    osquery_deb_url: "https://pkg.osquery.io/deb/{{ osquery_deb }}"
+    osquery_rpm_url: "https://pkg.osquerypackages.com/rpm/{{ osquery_rpm }}"
+    osquery_conf_path: "/etc/osquery/osquery.conf"
+    osquery_flags_path: "/etc/osquery/osquery.flags"
+    osquery_packs_dir: "/opt/osquery/share/osquery/packs"
+    osquery_pack_conf: "{{ osquery_packs_dir }}/custom_pack.conf"
+    wazuh_agent_version: "4.10.1-1"
+    wazuh_deb: "wazuh-agent_{{ wazuh_agent_version }}_amd64.deb"
+    wazuh_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/{{ wazuh_deb }}"
+    wazuh_manager: "192.168.112.160"
+    wazuh_group: "new.agents"
+
+  handlers:
+    - name: reboot if needed
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+      when: reboot_required is changed
+
+  tasks:
+    - name: Debug OS info
+      debug:
+        msg: "OS Family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
+
+    - name: Detect platform facts
+      set_fact:
+        os_family_lc: "{{ ansible_os_family | lower }}"
+        is_redos: "{{ ansible_distribution | lower in ['red', 'redos'] }}"
+
+    # Install prerequisites
+    - name: Install deps on Debian/Ubuntu
+      apt:
+        name:
+          - wget
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+      when: os_family_lc == 'debian'
+
+    - name: Install deps on RedOS
+      dnf:
+        name:
+          - wget
+          - curl
+          - gnupg2
+        state: present
+        update_cache: yes
+      when: os_family_lc == 'red' or is_redos
+
+    # osquery install
+    - name: Add osquery GPG key (RedOS)
+      rpm_key:
+        key: https://pkg.osquery.io/rpm/GPG
+        state: present
+      when: os_family_lc == 'red' or is_redos
+
+    - name: Add osquery repo (RedOS)
+      yum_repository:
+        name: osquery
+        description: osquery RPM repository
+        baseurl: https://pkg.osquerypackages.com/rpm
+        gpgcheck: yes
+        gpgkey: https://pkg.osquery.io/rpm/GPG
+        enabled: yes
+      when: os_family_lc == 'red' or is_redos
+
+    - name: Ensure osquery on RedOS via repo
+      dnf:
+        name: osquery
+        state: present
+        update_cache: yes
+      register: rpm_install_repo
+      ignore_errors: yes
+      when: os_family_lc == 'red' or is_redos
+
+    - name: Fallback: download osquery RPM
+      get_url:
+        url: "{{ osquery_rpm_url }}"
+        dest: "/tmp/{{ osquery_rpm }}"
+      register: rpm_download
+      ignore_errors: yes
+      when: (os_family_lc == 'red' or is_redos) and rpm_install_repo is failed
+
+    - name: Install osquery RPM from file
+      dnf:
+        name: "/tmp/{{ osquery_rpm }}"
+        state: present
+      when: rpm_download is succeeded
+
+    - name: Download osquery DEB (Ubuntu)
+      get_url:
+        url: "{{ osquery_deb_url }}"
+        dest: "/tmp/{{ osquery_deb }}"
+      register: deb_download
+      ignore_errors: yes
+      when: os_family_lc == 'debian'
+
+    - name: Install osquery DEB (Ubuntu)
+      apt:
+        deb: "/tmp/{{ osquery_deb }}"
+      register: deb_install
+      ignore_errors: yes
+      when: os_family_lc == 'debian' and deb_download is succeeded
+
+    - name: Fix missing deps on Ubuntu
+      apt:
+        name: osquery
+        state: present
+        update_cache: yes
+      when: os_family_lc == 'debian' and deb_install is failed
+
+    - name: Remove osquery package files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/{{ osquery_deb }}"
+        - "/tmp/{{ osquery_rpm }}"
+
+    - name: Create osquery dirs
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "/etc/osquery", mode: '0755' }
+        - { path: "{{ osquery_packs_dir }}", mode: '0755' }
+
+    - name: Write osquery.conf
+      copy:
+        dest: "{{ osquery_conf_path }}"
+        content: |
+          {
+            "options": {
+              "config_plugin": "filesystem",
+              "logger_plugin": "filesystem",
+              "utc": "true"
+            },
+            "packs": {
+              "custom-pack": "{{ osquery_pack_conf }}"
+            }
+          }
+        mode: '0644'
+
+    - name: Write osquery.flags
+      copy:
+        dest: "{{ osquery_flags_path }}"
+        content: |
+          --disable_audit=false
+          --audit_allow_config=true
+          --audit_persist=true
+          --audit_allow_process_events=true
+          --logger_rotate=true
+          --logger_rotate_size=26214400
+          --logger_rotate_max_files=25
+        mode: '0644'
+
+    - name: Write custom pack
+      copy:
+        dest: "{{ osquery_pack_conf }}"
+        content: |
+          {...}
+        mode: '0644'
+
+    - name: Enable and restart osqueryd
+      systemd:
+        name: osqueryd
+        enabled: yes
+        state: restarted
+
+    # Wazuh Agent install
+    - name: Download Wazuh Agent DEB
+      get_url:
+        url: "{{ wazuh_deb_url }}"
+        dest: "/tmp/{{ wazuh_deb }}"
+      when: os_family_lc == 'debian'
+
+    - name: Install Wazuh Agent
+      apt:
+        deb: "/tmp/{{ wazuh_deb }}"
+      when: os_family_lc == 'debian'
+
+    - name: Configure Wazuh Agent environment
+      copy:
+        dest: "/etc/default/wazuh-agent"
+        content: |
+          WAZUH_MANAGER="{{ wazuh_manager }}"
+          WAZUH_AGENT_GROUP="{{ wazuh_group }}"
+        mode: '0644'
+      when: os_family_lc == 'debian'
+
+    - name: Reload systemd, enable & start Wazuh Agent
+      systemd:
+        daemon_reload: yes
+        name: wazuh-agent
+        enabled: yes
+        state: started
+      when: os_family_lc == 'debian'
+
+    # Check reboot need
+    - name: Set reboot_required fact if kernel updated
+      register: reboot_info
+      shell: needs-restarting -r || ( [ -f /var/run/reboot-required ] && echo reboot-required )
+      changed_when: reboot_info.stdout != ''
+      failed_when: false
+
+    - name: Mark reboot if needed
+      set_fact:
+        reboot_required: yes
+      when: reboot_info.stdout != ''
+
