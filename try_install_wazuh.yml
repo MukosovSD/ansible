@@ -1,6 +1,6 @@
 ---
 - name: Установка и настройка Wazuh Agent 4.10.1 на Ubuntu и RedOS
-  hosts: all
+  hosts: test_deploy_wazuh_agent
   become: true
   vars:
     wazuh_manager: "192.168.112.160"
