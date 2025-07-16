@@ -1,98 +1,106 @@
 ---
 - name: Установка и настройка Wazuh Agent 4.10.1 на Ubuntu и RedOS
-  hosts: test_deploy_wazuh_agent
-  become: yes
+  hosts: all
+  become: true
   vars:
-    wazuh_agent_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
-    wazuh_agent_deb: "wazuh-agent_4.10.1-1_amd64.deb"
-    wazuh_manager_ip: "192.168.112.160"
+    wazuh_manager: "192.168.112.160"
     wazuh_agent_group: "new.agents"
-    wazuh_agent_pkg_path: "/tmp/{{ wazuh_agent_deb }}"
+    wazuh_rpm_url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-4.10.1-1.x86_64.rpm"
+    wazuh_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
+    wazuh_rpm_path: "/tmp/wazuh-agent.rpm"
+    wazuh_deb_path: "/tmp/wazuh-agent.deb"
 
   tasks:
+
     - name: Отладка - вывод информации о дистрибутиве
       debug:
         msg: "OS Family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
-      delegate_to: localhost
 
-    - name: Установка зависимостей на Ubuntu
+    - name: Установка curl для Debian-based
       apt:
-        name: wget
-        state: present
+        name: curl
         update_cache: yes
+        state: present
       when: ansible_os_family == "Debian"
 
-    - name: Установка зависимостей на RedOS
-      dnf:
-        name: wget
+    - name: Установка curl для RedHat-based
+      yum:
+        name: curl
         state: present
-        update_cache: yes
-      when: ansible_distribution in ["RedOS", "RedHat", "CentOS", "RED"]
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
 
-    - name: Скачивание пакета wazuh-agent для Ubuntu
+    ###########################################################################
+    #                           УСТАНОВКА НА DEBIAN                           #
+    ###########################################################################
+
+    - name: Скачать DEB-пакет wazuh-agent
       get_url:
-        url: "{{ wazuh_agent_url }}"
-        dest: "{{ wazuh_agent_pkg_path }}"
-        mode: '0644'
+        url: "{{ wazuh_deb_url }}"
+        dest: "{{ wazuh_deb_path }}"
       when: ansible_os_family == "Debian"
 
-    - name: Установка wazuh-agent через dpkg с передачей переменных окружения
-      ansible.builtin.command: >
-        /bin/bash -c "WAZUH_MANAGER='{{ wazuh_manager_ip }}'
-        WAZUH_AGENT_GROUP='{{ wazuh_agent_group }}'
-        dpkg -i {{ wazuh_agent_pkg_path }}"
-      args:
-        creates: /etc/init.d/wazuh-agent
+    - name: Установить wazuh-agent через dpkg
+      command: dpkg -i {{ wazuh_deb_path }}
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager }}"
       when: ansible_os_family == "Debian"
 
-    - name: Удаление deb-пакета после установки
+    - name: Удалить DEB после установки
       file:
-        path: "{{ wazuh_agent_pkg_path }}"
+        path: "{{ wazuh_deb_path }}"
         state: absent
       when: ansible_os_family == "Debian"
 
-    - name: Добавление репозитория Wazuh для RedOS
-      yum_repository:
-        name: wazuh
-        description: Wazuh repository
-        baseurl: https://packages.wazuh.com/4.x/yum/
-        gpgcheck: yes
-        gpgkey: https://packages.wazuh.com/key/GPG-KEY-WAZUH
-        enabled: yes
-      when: ansible_os_family == "RedHat"
+    ###########################################################################
+    #                            УСТАНОВКА НА REDOS                           #
+    ###########################################################################
 
-    - name: Установка wazuh-agent на RedOS
-      dnf:
-        name: wazuh-agent
-        state: present
-      when: ansible_os_family == "RedHat"
+    - name: Скачать RPM-пакет wazuh-agent
+      get_url:
+        url: "{{ wazuh_rpm_url }}"
+        dest: "{{ wazuh_rpm_path }}"
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
 
-    - name: Конфигурация wazuh-agent для RedOS (wazuh-manager и группа)
+    - name: Установить wazuh-agent через rpm
+      command: rpm -ihv {{ wazuh_rpm_path }}
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager }}"
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+
+    - name: Удалить RPM после установки
+      file:
+        path: "{{ wazuh_rpm_path }}"
+        state: absent
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+
+    ###########################################################################
+    #                           КОНФИГУРАЦИЯ AGENT                            #
+    ###########################################################################
+
+    - name: Вставка адреса Wazuh Manager в конфиг
       lineinfile:
         path: /var/ossec/etc/ossec.conf
         regexp: '<address>.*</address>'
-        line: "<address>{{ wazuh_manager_ip }}</address>"
-        backrefs: yes
-      when: ansible_os_family == "RedHat"
+        line: "<address>{{ wazuh_manager }}</address>"
+        backup: yes
 
-    - name: Вставка параметра группировки для RedOS
+    - name: Вставка группы агента в конфиг (если нет)
       blockinfile:
         path: /var/ossec/etc/ossec.conf
-        insertafter: '</address>'
+        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK wazuh-agent group -->"
         block: |
           <group>{{ wazuh_agent_group }}</group>
-      when: ansible_os_family == "RedHat"
 
-    - name: Перезагрузка systemd для обоих дистрибутивов
-      ansible.builtin.systemd:
-        daemon_reload: yes
+    ###########################################################################
+    #                           ЗАПУСК АГЕНТА                                 #
+    ###########################################################################
+
+    - name: Перезагрузка systemd
+      systemd:
+        daemon_reload: true
 
     - name: Включение агента Wazuh
-      ansible.builtin.systemd:
+      systemd:
         name: wazuh-agent
-        enabled: yes
-
-    - name: Запуск агента Wazuh
-      ansible.builtin.systemd:
-        name: wazuh-agent
+        enabled: true
         state: started
