@@ -1,61 +1,75 @@
 ---
-- name: Полное удаление Wazuh Agent (деинсталляция + чистка)
-  hosts: test_deploy_wazuh_agent
+- name: Полное уничтожение Wazuh Agent (деинсталляция, чистка, systemd wipe)
+  hosts: all
   become: yes
   tasks:
 
-    - name: Остановка службы wazuh-agent
+    - name: Остановить службу wazuh-agent
       systemd:
         name: wazuh-agent
         state: stopped
         enabled: no
-      ignore_errors: yes
+      ignore_errors: true
 
-    - name: Удаление пакета wazuh-agent с Debian/Ubuntu
+    - name: Удалить wazuh-agent из автозагрузки
+      file:
+        path: /etc/systemd/system/multi-user.target.wants/wazuh-agent.service
+        state: absent
+      ignore_errors: true
+
+    - name: Удалить legacy init.d скрипт (если есть)
+      file:
+        path: /etc/init.d/wazuh-agent
+        state: absent
+      ignore_errors: true
+
+    - name: Удалить wazuh-agent (Ubuntu/Debian)
       apt:
         name: wazuh-agent
         state: absent
         purge: yes
-      when: ansible_facts['os_family'] == "Debian"
-      ignore_errors: yes
+      when: ansible_facts['os_family'] == 'Debian'
+      ignore_errors: true
 
-    - name: Удаление пакета wazuh-agent с RedHat/RedOS
+    - name: Удалить wazuh-agent (RedHat/RedOS)
       yum:
         name: wazuh-agent
         state: absent
-      when: ansible_facts['os_family'] == "RedHat" or ansible_facts['os_family'] == "RED"
-      ignore_errors: yes
+      when: ansible_facts['os_family'] == 'RedHat' or ansible_facts['os_family'] == 'RED'
+      ignore_errors: true
 
-    - name: Удаление каталога /var/ossec (конфиги, ключи, логи)
+    - name: Удалить /var/ossec
       file:
         path: /var/ossec
         state: absent
-      ignore_errors: yes
+      ignore_errors: true
 
-    - name: Удаление ossec-сокетов (если остались)
+    - name: Удалить ossec сокеты
       file:
         path: /var/run/ossec
         state: absent
-      ignore_errors: yes
+      ignore_errors: true
 
-    - name: Очистка systemd от мусора
-      command: systemctl daemon-reexec
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Удаление всех следов wazuh-agent из systemd
+    - name: Удалить systemd unit файл
       file:
         path: /etc/systemd/system/wazuh-agent.service
         state: absent
-      ignore_errors: yes
+      ignore_errors: true
 
-    - name: Удаление логов Wazuh, если остались
+    - name: Очистить systemd кеш
+      shell: |
+        systemctl daemon-reload
+        systemctl reset-failed
+      changed_when: false
+      ignore_errors: true
+
+    - name: Удалить логи Wazuh
       file:
         path: /var/log/ossec.log
         state: absent
-      ignore_errors: yes
+      ignore_errors: true
 
-    - name: Отладка — подтверждение удаления
+    - name: Подтвердить: агент уничтожен
       debug:
-        msg: "Wazuh Agent удалён и все следы стерты с {{ inventory_hostname }}"
+        msg: "Wazuh Agent был полностью уничтожен на {{ inventory_hostname }}"
 
