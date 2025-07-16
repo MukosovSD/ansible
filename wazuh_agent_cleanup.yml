@@ -1,6 +1,6 @@
 ---
 - name: Полное уничтожение Wazuh Agent (деинсталляция, чистка, systemd wipe)
-  hosts: test_deploy_wazuh_agent
+  hosts: all
   become: yes
   tasks:
 
@@ -35,7 +35,7 @@
       yum:
         name: wazuh-agent
         state: absent
-      when: ansible_facts['os_family'] == 'RedHat' or ansible_facts['os_family'] == 'RED'
+      when: ansible_facts['os_family'] in ['RedHat', 'RedOS']
       ignore_errors: true
 
     - name: Удалить /var/ossec
@@ -69,7 +69,6 @@
         state: absent
       ignore_errors: true
 
-    - name: Подтвердить: агент уничтожен
+    - name: "Подтвердить: агент уничтожен"
       debug:
         msg: "Wazuh Agent был полностью уничтожен на {{ inventory_hostname }}"
-
