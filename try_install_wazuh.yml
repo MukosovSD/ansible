@@ -1,6 +1,6 @@
 ---
 - name: Установка и настройка Wazuh Agent 4.10.1 на Ubuntu и RedOS
-  hosts: test_vms
+  hosts: test_deploy_wazuh_agent
   become: yes
   vars:
     wazuh_agent_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
