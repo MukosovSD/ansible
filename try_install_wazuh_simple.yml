@@ -1,0 +1,57 @@
+---
+- name: Установка Wazuh Agent 4.10.1 на Ubuntu и RedOS
+  hosts: test_deploy_wazuh_agent
+  become: true
+  vars:
+    wazuh_manager: "192.168.112.160"
+    wazuh_agent_group: "new.agents"
+    wazuh_rpm_url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-4.10.1-1.x86_64.rpm"
+    wazuh_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
+    wazuh_rpm_path: "/tmp/wazuh-agent.rpm"
+    wazuh_deb_path: "/tmp/wazuh-agent.deb"
+
+  tasks:
+    - name: Установка curl для Ubuntu
+      apt:
+        name: curl
+        update_cache: yes
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Установка curl для RedOS
+      yum:
+        name: curl
+        state: present
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+
+    - name: Скачать DEB-пакет wazuh-agent для Ubuntu
+      command: wget -O {{ wazuh_deb_path }} {{ wazuh_deb_url }}
+      when: ansible_os_family == "Debian"
+
+    - name: Установить wazuh-agent на Ubuntu
+      command: dpkg -i {{ wazuh_deb_path }}
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager }}"
+        WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
+      when: ansible_os_family == "Debian"
+
+    - name: Скачать RPM-пакет wazuh-agent для RedOS
+      command: curl -o {{ wazuh_rpm_path }} {{ wazuh_rpm_url }}
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+
+    - name: Установить wazuh-agent на RedOS
+      command: rpm -ihv {{ wazuh_rpm_path }}
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager }}"
+        WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+
+    - name: Перезагрузка systemd
+      systemd:
+        daemon_reload: true
+
+    - name: Включение и запуск агента Wazuh
+      systemd:
+        name: wazuh-agent
+        enabled: true
+        state: started
