@@ -1,111 +1,98 @@
 ---
-- name: Install and configure Wazuh Agent on Ubuntu and RedOS
-  hosts: all
+- name: Установка и настройка Wazuh Agent 4.10.1 на Ubuntu и RedOS
+  hosts: test_vms
   become: yes
   vars:
-    wazuh_manager: "192.168.112.160"
+    wazuh_agent_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
+    wazuh_agent_deb: "wazuh-agent_4.10.1-1_amd64.deb"
+    wazuh_manager_ip: "192.168.112.160"
     wazuh_agent_group: "new.agents"
-    wazuh_agent_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
-    wazuh_agent_rpm_url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-4.10.1-1.x86_64.rpm"
-    reboot_required: false
+    wazuh_agent_pkg_path: "/tmp/{{ wazuh_agent_deb }}"
 
   tasks:
-    - name: Debug - Display OS information
-      ansible.builtin.debug:
+    - name: Отладка - вывод информации о дистрибутиве
+      debug:
         msg: "OS Family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
       delegate_to: localhost
 
-    - name: Set OS facts
-      ansible.builtin.set_fact:
-        os_family: "{{ ansible_os_family | lower }}"
-        is_redos: "{{ ansible_distribution | lower in ['red', 'redos'] }}"
-
-    - name: Install dependencies for Ubuntu
-      ansible.builtin.apt:
-        name:
-          - wget
-          - curl
-          - gnupg
+    - name: Установка зависимостей на Ubuntu
+      apt:
+        name: wget
         state: present
         update_cache: yes
-      when: os_family == 'debian'
+      when: ansible_os_family == "Debian"
 
-    - name: Install dependencies for RedOS
-      ansible.builtin.dnf:
-        name:
-          - wget
-          - curl
-          - gnupg2
+    - name: Установка зависимостей на RedOS
+      dnf:
+        name: wget
         state: present
         update_cache: yes
-      when: os_family == 'redhat' or is_redos
+      when: ansible_os_family == "RedHat"
 
-    - name: Download Wazuh Agent DEB for Ubuntu
-      ansible.builtin.get_url:
-        url: "{{ wazuh_agent_deb_url }}"
-        dest: "/tmp/wazuh-agent.deb"
+    - name: Скачивание пакета wazuh-agent для Ubuntu
+      get_url:
+        url: "{{ wazuh_agent_url }}"
+        dest: "{{ wazuh_agent_pkg_path }}"
         mode: '0644'
-      when: os_family == 'debian'
+      when: ansible_os_family == "Debian"
 
-    - name: Install Wazuh Agent on Ubuntu
-      ansible.builtin.command:
-        cmd: WAZUH_MANAGER={{ wazuh_manager }} WAZUH_AGENT_GROUP={{ wazuh_agent_group }} dpkg -i /tmp/wazuh-agent.deb
-      when: os_family == 'debian'
-      register: wazuh_install_deb
-      changed_when: wazuh_install_deb.rc == 0
+    - name: Установка wazuh-agent через dpkg с передачей переменных окружения
+      ansible.builtin.command: >
+        /bin/bash -c "WAZUH_MANAGER='{{ wazuh_manager_ip }}'
+        WAZUH_AGENT_GROUP='{{ wazuh_agent_group }}'
+        dpkg -i {{ wazuh_agent_pkg_path }}"
+      args:
+        creates: /etc/init.d/wazuh-agent
+      when: ansible_os_family == "Debian"
 
-    - name: Download Wazuh Agent RPM for RedOS
-      ansible.builtin.get_url:
-        url: "{{ wazuh_agent_rpm_url }}"
-        dest: "/tmp/wazuh-agent.rpm"
-        mode: '0644'
-      when: os_family == 'redhat' or is_redos
+    - name: Удаление deb-пакета после установки
+      file:
+        path: "{{ wazuh_agent_pkg_path }}"
+        state: absent
+      when: ansible_os_family == "Debian"
 
-    - name: Install Wazuh Agent on RedOS
-      ansible.builtin.dnf:
-        name: "/tmp/wazuh-agent.rpm"
+    - name: Добавление репозитория Wazuh для RedOS
+      yum_repository:
+        name: wazuh
+        description: Wazuh repository
+        baseurl: https://packages.wazuh.com/4.x/yum/
+        gpgcheck: yes
+        gpgkey: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Установка wazuh-agent на RedOS
+      dnf:
+        name: wazuh-agent
         state: present
-      when: os_family == 'redhat' or is_redos
-      environment:
-        WAZUH_MANAGER: "{{ wazuh_manager }}"
-        WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
+      when: ansible_os_family == "RedHat"
 
-    - name: Clean up downloaded Wazuh Agent DEB
-      ansible.builtin.file:
-        path: "/tmp/wazuh-agent.deb"
-        state: absent
-      when: os_family == 'debian'
+    - name: Конфигурация wazuh-agent для RedOS (wazuh-manager и группа)
+      lineinfile:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<address>.*</address>'
+        line: "<address>{{ wazuh_manager_ip }}</address>"
+        backrefs: yes
+      when: ansible_os_family == "RedHat"
 
-    - name: Clean up downloaded Wazuh Agent RPM
-      ansible.builtin.file:
-        path: "/tmp/wazuh-agent.rpm"
-        state: absent
-      when: os_family == 'redhat' or is_redos
+    - name: Вставка параметра группировки для RedOS
+      blockinfile:
+        path: /var/ossec/etc/ossec.conf
+        insertafter: '</address>'
+        block: |
+          <group>{{ wazuh_agent_group }}</group>
+      when: ansible_os_family == "RedHat"
 
-    - name: Reload systemd daemon
+    - name: Перезагрузка systemd для обоих дистрибутивов
       ansible.builtin.systemd:
         daemon_reload: yes
 
-    - name: Enable and start Wazuh Agent service
+    - name: Включение агента Wazuh
       ansible.builtin.systemd:
         name: wazuh-agent
         enabled: yes
-        state: started
 
-    - name: Mark system for reboot
-      ansible.builtin.set_fact:
-        reboot_required: true
-
-    - name: Reboot system if required
-      ansible.builtin.reboot:
-        msg: "Rebooting after Wazuh Agent installation"
-        pre_reboot_delay: 5
-        post_reboot_delay: 30
-        reboot_timeout: 300
-      when: reboot_required
-
-  handlers:
-    - name: Restart Wazuh Agent
+    - name: Запуск агента Wazuh
       ansible.builtin.systemd:
         name: wazuh-agent
-        state: restarted
+        state: started
