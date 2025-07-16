@@ -1,6 +1,6 @@
 ---
 - name: Полное удаление Wazuh Agent (деинсталляция + чистка)
-  hosts: all
+  hosts: test_deploy_wazuh_agent
   become: yes
   tasks:
 
