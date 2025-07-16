@@ -1,0 +1,61 @@
+---
+- name: Полное удаление Wazuh Agent (деинсталляция + чистка)
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Остановка службы wazuh-agent
+      systemd:
+        name: wazuh-agent
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Удаление пакета wazuh-agent с Debian/Ubuntu
+      apt:
+        name: wazuh-agent
+        state: absent
+        purge: yes
+      when: ansible_facts['os_family'] == "Debian"
+      ignore_errors: yes
+
+    - name: Удаление пакета wazuh-agent с RedHat/RedOS
+      yum:
+        name: wazuh-agent
+        state: absent
+      when: ansible_facts['os_family'] == "RedHat" or ansible_facts['os_family'] == "RED"
+      ignore_errors: yes
+
+    - name: Удаление каталога /var/ossec (конфиги, ключи, логи)
+      file:
+        path: /var/ossec
+        state: absent
+      ignore_errors: yes
+
+    - name: Удаление ossec-сокетов (если остались)
+      file:
+        path: /var/run/ossec
+        state: absent
+      ignore_errors: yes
+
+    - name: Очистка systemd от мусора
+      command: systemctl daemon-reexec
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Удаление всех следов wazuh-agent из systemd
+      file:
+        path: /etc/systemd/system/wazuh-agent.service
+        state: absent
+      ignore_errors: yes
+
+    - name: Удаление логов Wazuh, если остались
+      file:
+        path: /var/log/ossec.log
+        state: absent
+      ignore_errors: yes
+
+    - name: Отладка — подтверждение удаления
+      debug:
+        msg: "Wazuh Agent удалён и все следы стерты с {{ inventory_hostname }}"
+
