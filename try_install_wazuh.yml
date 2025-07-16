@@ -84,12 +84,19 @@
         line: "<address>{{ wazuh_manager }}</address>"
         backup: yes
 
-    - name: Вставка группы агента в конфиг (если нет)
-      blockinfile:
+
+    - name: Вставка группы агента в блок <client> (внутрь XML!)
+      ansible.builtin.blockinfile:
         path: /var/ossec/etc/ossec.conf
-        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK wazuh-agent group -->"
+        marker: "<!-- BEGIN ANSIBLE MANAGED BLOCK wazuh-agent group -->\n{mark}\n<!-- END ANSIBLE MANAGED BLOCK wazuh-agent group -->"
         block: |
-          <group>{{ wazuh_agent_group }}</group>
+          <enrollment>
+            <enabled>yes</enabled>
+            <groups>{{ wazuh_agent_group }}</groups>
+            <authorization_pass_path>etc/authd.pass</authorization_pass_path>
+          </enrollment>
+        insertafter: '<client>'
+        backup: yes
 
     ###########################################################################
     #                           ЗАПУСК АГЕНТА                                 #
