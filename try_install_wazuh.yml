@@ -11,16 +11,31 @@
     wazuh_deb_path: "/tmp/wazuh-agent.deb"
 
   tasks:
-
     - name: Отладка - вывод информации о дистрибутиве
       debug:
         msg: "OS Family: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}"
 
-    - name: Установка curl для Debian-based
+    - name: Проверка доступности Wazuh Manager
+      wait_for:
+        host: "{{ wazuh_manager }}"
+        port: 1514
+        timeout: 10
+      delegate_to: localhost
+
+    ###########################################################################
+    #                          УСТАНОВКА ЗАВИСИМОСТЕЙ                         #
+    ###########################################################################
+
+    - name: Установка curl и зависимостей для Debian-based
       apt:
-        name: curl
+        name: "{{ packages }}"
         update_cache: yes
         state: present
+      vars:
+        packages:
+          - curl
+          - apt-transport-https
+          - gnupg2
       when: ansible_os_family == "Debian"
 
     - name: Установка curl для RedHat-based
@@ -33,14 +48,23 @@
     #                           УСТАНОВКА НА DEBIAN                           #
     ###########################################################################
 
+    - name: Проверка наличия wazuh-agent на Debian
+      command: dpkg -l wazuh-agent
+      register: dpkg_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "Debian"
+
     - name: Скачать DEB-пакет wazuh-agent
       get_url:
         url: "{{ wazuh_deb_url }}"
         dest: "{{ wazuh_deb_path }}"
       when: ansible_os_family == "Debian"
 
-    - name: Установить wazuh-agent через dpkg
-      command: dpkg -i {{ wazuh_deb_path }}
+    - name: Установить wazuh-agent через apt
+      apt:
+        deb: "{{ wazuh_deb_path }}"
+        state: present
       environment:
         WAZUH_MANAGER: "{{ wazuh_manager }}"
       when: ansible_os_family == "Debian"
@@ -55,14 +79,23 @@
     #                            УСТАНОВКА НА REDOS                           #
     ###########################################################################
 
+    - name: Проверка наличия wazuh-agent на RedHat/RedOS
+      command: rpm -q wazuh-agent
+      register: rpm_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+
     - name: Скачать RPM-пакет wazuh-agent
       get_url:
         url: "{{ wazuh_rpm_url }}"
         dest: "{{ wazuh_rpm_path }}"
       when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
 
-    - name: Установить wazuh-agent через rpm
-      command: rpm -ihv {{ wazuh_rpm_path }}
+    - name: Установить wazuh-agent через yum
+      yum:
+        name: "{{ wazuh_rpm_path }}"
+        state: present
       environment:
         WAZUH_MANAGER: "{{ wazuh_manager }}"
       when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
@@ -77,15 +110,21 @@
     #                           КОНФИГУРАЦИЯ AGENT                            #
     ###########################################################################
 
+    - name: Проверка наличия ossec.conf
+      stat:
+        path: /var/ossec/etc/ossec.conf
+      register: ossec_conf
+      failed_when: not ossec_conf.stat.exists
+
     - name: Вставка адреса Wazuh Manager в конфиг
       lineinfile:
         path: /var/ossec/etc/ossec.conf
         regexp: '<address>.*</address>'
         line: "<address>{{ wazuh_manager }}</address>"
         backup: yes
+      when: ossec_conf.stat.exists
 
-
-    - name: Вставка группы агента в блок <client> (внутрь XML!)
+    - name: Вставка группы агента в блок <client>
       ansible.builtin.blockinfile:
         path: /var/ossec/etc/ossec.conf
         marker: "<!-- BEGIN ANSIBLE MANAGED BLOCK wazuh-agent group -->\n{mark}\n<!-- END ANSIBLE MANAGED BLOCK wazuh-agent group -->"
@@ -97,6 +136,7 @@
           </enrollment>
         insertafter: '<client>'
         backup: yes
+      when: ossec_conf.stat.exists
 
     ###########################################################################
     #                           ЗАПУСК АГЕНТА                                 #
@@ -106,8 +146,14 @@
       systemd:
         daemon_reload: true
 
-    - name: Включение агента Wazuh
+    - name: Включение и запуск агента Wazuh
       systemd:
         name: wazuh-agent
         enabled: true
         state: started
+
+    - name: Проверка статуса wazuh-agent
+      command: systemctl status wazuh-agent
+      register: agent_status
+      changed_when: false
+      failed_when: agent_status.rc != 0
