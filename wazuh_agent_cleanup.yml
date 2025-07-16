@@ -1,6 +1,6 @@
 ---
 - name: Полное уничтожение Wazuh Agent (деинсталляция, чистка, systemd wipe)
-  hosts: all
+  hosts: test_deploy_wazuh_agent
   become: yes
   tasks:
 
