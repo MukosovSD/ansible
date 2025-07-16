@@ -34,17 +34,42 @@
         WAZUH_MANAGER: "{{ wazuh_manager }}"
         WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
       when: ansible_os_family == "Debian"
+      ignore_errors: true
 
     - name: Скачать RPM-пакет wazuh-agent для RedOS
       command: curl -o {{ wazuh_rpm_path }} {{ wazuh_rpm_url }}
       when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
 
     - name: Установить wazuh-agent на RedOS
-      command: rpm -ihv {{ wazuh_rpm_path }}
+      command: rpm -ihv --replacepkgs {{ wazuh_rpm_path }}
       environment:
         WAZUH_MANAGER: "{{ wazuh_manager }}"
         WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
       when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+      ignore_errors: true
+
+    - name: Настройка адреса Wazuh Manager в ossec.conf
+      lineinfile:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<address>.*</address>'
+        line: "<address>{{ wazuh_manager }}</address>"
+        backup: yes
+      when: ansible_os_family in ["Debian", "RedHat"] or ansible_distribution == "RED"
+
+    - name: Настройка группы агента в ossec.conf
+      blockinfile:
+        path: /var/ossec/etc/ossec.conf
+        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK wazuh-agent group -->"
+        block: |
+          <client>
+            <enrollment>
+              <enabled>yes</enabled>
+              <groups>{{ wazuh_agent_group }}</groups>
+            </enrollment>
+          </client>
+        insertafter: "</client>"
+        backup: yes
+      when: ansible_os_family in ["Debian", "RedHat"] or ansible_distribution == "RED"
 
     - name: Перезагрузка systemd
       systemd:
@@ -55,3 +80,15 @@
         name: wazuh-agent
         enabled: true
         state: started
+      ignore_errors: true
+
+    - name: Проверка статуса wazuh-agent
+      command: systemctl status wazuh-agent
+      register: agent_status
+      changed_when: false
+      failed_when: false
+
+    - name: Вывод статуса wazuh-agent
+      debug:
+        msg: "{{ agent_status.stdout_lines }}"
+      when: agent_status.stdout is defined
