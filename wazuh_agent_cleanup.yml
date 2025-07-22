@@ -12,7 +12,6 @@
       ansible.builtin.systemd:
         name: wazuh-agent
         state: stopped
-        enabled: false
       ignore_errors: true
 
     - name: Удалить wazuh-agent .deb
@@ -25,14 +24,14 @@
       ansible.builtin.file:
         path: /tmp/wazuh-agent.rpm
         state: absent
-      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'Red', 'Linux']
+      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'RED', 'Linux']
 
     - name: Удалить пакет wazuh-agent (Debian/Ubuntu)
       ansible.builtin.apt:
         name: wazuh-agent
         state: absent
         purge: true
-        update_cache: yes
+        force: true
       when: ansible_facts['os_family'] == 'Debian'
       ignore_errors: true
 
@@ -40,41 +39,27 @@
       ansible.builtin.yum:
         name: wazuh-agent
         state: absent
-      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'Red', 'Linux']
+      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'RED', 'Linux']
       ignore_errors: true
 
-    - name: Удалить /var/ossec
+    - name: Удалить /var/ossec (каталог агента)
       ansible.builtin.file:
         path: /var/ossec
         state: absent
-      ignore_errors: true
 
     - name: Удалить /etc/init.d/wazuh-agent (если есть)
       ansible.builtin.file:
         path: /etc/init.d/wazuh-agent
         state: absent
-      ignore_errors: true
 
     - name: Удалить systemd unit wazuh-agent (если есть)
       ansible.builtin.file:
-        path: /etc/systemd/system/wazuh-agent.service
+        path: /usr/lib/systemd/system/wazuh-agent.service
         state: absent
+
+    - name: Перезагрузить systemd (daemon-reload)
+      ansible.builtin.command: systemctl daemon-reload
+
+    - name: Убедиться, что агента больше нет
+      ansible.builtin.command: systemctl status wazuh-agent
       ignore_errors: true
-
-    - name: Очистить systemd daemon-reload/reset
-      ansible.builtin.shell: |
-        systemctl daemon-reload
-        systemctl reset-failed
-      args:
-        warn: false
-      changed_when: false
-
-    - name: Удалить логи /var/log/ossec.log
-      ansible.builtin.file:
-        path: /var/log/ossec.log
-        state: absent
-      ignore_errors: true
-
-    - name: Подтверждение удаления
-      ansible.builtin.debug:
-        msg: "Wazuh Agent уничтожен и все следы удалены с {{ inventory_hostname }}"
