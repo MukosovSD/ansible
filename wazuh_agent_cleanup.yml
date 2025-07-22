@@ -1,74 +1,28 @@
 ---
-- name: Полное уничтожение Wazuh Agent (деинсталляция, чистка, systemd wipe)
+- name: Remove Wazuh Agent
   hosts: all
-  become: yes
+  become: true
   tasks:
-
-    - name: Остановить службу wazuh-agent
+    - name: Stop Wazuh Agent
       systemd:
         name: wazuh-agent
         state: stopped
-        enabled: no
-      ignore_errors: true
+        enabled: false
+        ignore_errors: true
 
-    - name: Удалить wazuh-agent из автозагрузки
-      file:
-        path: /etc/systemd/system/multi-user.target.wants/wazuh-agent.service
-        state: absent
-      ignore_errors: true
-
-    - name: Удалить legacy init.d скрипт (если есть)
-      file:
-        path: /etc/init.d/wazuh-agent
-        state: absent
-      ignore_errors: true
-
-    - name: Удалить wazuh-agent (Ubuntu/Debian)
-      apt:
-        name: wazuh-agent
-        state: absent
-        purge: yes
-      when: ansible_facts['os_family'] == 'Debian'
-      ignore_errors: true
-
-    - name: Удалить wazuh-agent (RedHat/RedOS)
+    - name: Remove Wazuh Agent on RedHat
       yum:
         name: wazuh-agent
         state: absent
-      when: ansible_facts['os_family'] in ['RedHat', 'RedOS']
-      ignore_errors: true
+      when: ansible_os_family == "RedHat"
 
-    - name: Удалить /var/ossec
+    - name: Remove Wazuh Agent on Debian
+      apt:
+        name: wazuh-agent
+        state: absent
+      when: ansible_os_family == "Debian"
+
+    - name: Remove agent directory
       file:
         path: /var/ossec
         state: absent
-      ignore_errors: true
-
-    - name: Удалить ossec сокеты
-      file:
-        path: /var/run/ossec
-        state: absent
-      ignore_errors: true
-
-    - name: Удалить systemd unit файл
-      file:
-        path: /etc/systemd/system/wazuh-agent.service
-        state: absent
-      ignore_errors: true
-
-    - name: Очистить systemd кеш
-      shell: |
-        systemctl daemon-reload
-        systemctl reset-failed
-      changed_when: false
-      ignore_errors: true
-
-    - name: Удалить логи Wazuh
-      file:
-        path: /var/log/ossec.log
-        state: absent
-      ignore_errors: true
-
-    - name: "Подтвердить: агент уничтожен"
-      debug:
-        msg: "Wazuh Agent был полностью уничтожен на {{ inventory_hostname }}"
