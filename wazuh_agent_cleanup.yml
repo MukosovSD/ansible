@@ -1,48 +1,51 @@
 ---
-- name: Полная чистка Wazuh Agent (строго по следам установки)
+- name: Полная чистка Wazuh Agent и osquery
   hosts: all
   become: true
-
   tasks:
-    - name: Покажи инфу про ОС
-      ansible.builtin.debug:
-        msg: "OS: {{ ansible_facts['os_family'] }} | {{ ansible_facts['distribution'] }}"
+
+    - name: Gather minimal facts
+      ansible.builtin.setup:
+        gather_subset: min
 
     - name: Остановить wazuh-agent
       ansible.builtin.systemd:
         name: wazuh-agent
         state: stopped
+        enabled: false
       ignore_errors: true
 
-    - name: Удалить wazuh-agent .deb
-      ansible.builtin.file:
-        path: /tmp/wazuh-agent.deb
-        state: absent
-      when: ansible_facts['os_family'] == 'Debian'
-
-    - name: Удалить wazuh-agent .rpm
-      ansible.builtin.file:
-        path: /tmp/wazuh-agent.rpm
-        state: absent
-      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'RED', 'Linux']
-
-    - name: Удалить пакет wazuh-agent (Debian/Ubuntu)
+    - name: Удалить wazuh-agent пакет (DEB)
       ansible.builtin.apt:
         name: wazuh-agent
         state: absent
-        purge: true
-        force: true
+        purge: yes
       when: ansible_facts['os_family'] == 'Debian'
       ignore_errors: true
 
-    - name: Удалить пакет wazuh-agent (RedHat/RedOS)
+    - name: Удалить wazuh-agent пакет (RPM)
       ansible.builtin.yum:
         name: wazuh-agent
         state: absent
       when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'RED', 'Linux']
       ignore_errors: true
 
-    - name: Удалить /var/ossec (каталог агента)
+    - name: Удалить osquery пакет (DEB)
+      ansible.builtin.apt:
+        name: osquery
+        state: absent
+        purge: yes
+      when: ansible_facts['os_family'] == 'Debian'
+      ignore_errors: true
+
+    - name: Удалить osquery пакет (RPM)
+      ansible.builtin.yum:
+        name: osquery
+        state: absent
+      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'RED', 'Linux']
+      ignore_errors: true
+
+    - name: Удалить /var/ossec
       ansible.builtin.file:
         path: /var/ossec
         state: absent
@@ -52,14 +55,14 @@
         path: /etc/init.d/wazuh-agent
         state: absent
 
-    - name: Удалить systemd unit wazuh-agent (если есть)
+    - name: Удалить systemd unit wazuh-agent
       ansible.builtin.file:
         path: /usr/lib/systemd/system/wazuh-agent.service
         state: absent
-
-    - name: Перезагрузить systemd (daemon-reload)
-      ansible.builtin.command: systemctl daemon-reload
-
-    - name: Убедиться, что агента больше нет
-      ansible.builtin.command: systemctl status wazuh-agent
       ignore_errors: true
+
+    - name: Выполнить systemctl daemon-reload
+      ansible.builtin.command: systemctl daemon-reexec
+
+    - name: Сбросить systemctl failed
+      ansible.builtin.command: systemctl reset-failed
