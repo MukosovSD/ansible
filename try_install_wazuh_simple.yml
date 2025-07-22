@@ -1,5 +1,5 @@
 ---
-- name: Установка Wazuh Agent 4.10.1 (жестко, без переменных)
+- name: Установка Wazuh Agent 4.10.1 (строго и без переменных окружения)
   hosts: all
   become: true
 
@@ -11,11 +11,12 @@
     wazuh_rpm_url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-{{ wazuh_version }}-1.x86_64.rpm"
 
   tasks:
-    - name: Собираем факты
-      setup:
+    - name: Покажи инфу про ОС
+      debug:
+        msg: "Detected OS family: {{ ansible_facts['os_family'] }}, distribution: {{ ansible_facts['distribution'] }}"
 
-    - name: Установка на Ubuntu/Debian через .deb
-      when: ansible_facts['os_family'] == "Debian"
+    - name: Установка на Debian/Ubuntu
+      when: ansible_facts['os_family'] in ["Debian"]
       block:
         - name: Скачать .deb
           get_url:
@@ -28,8 +29,8 @@
           args:
             creates: /var/ossec
 
-    - name: Установка на RedOS/RHEL через .rpm
-      when: ansible_facts['os_family'] == "RedHat"
+    - name: Установка на RedHat/RedOS
+      when: ansible_facts['os_family'] in ["RedHat", "Red", "RED", "RedOS", "Linux"]
       block:
         - name: Скачать .rpm
           get_url:
@@ -42,20 +43,30 @@
           args:
             creates: /var/ossec
 
-    - name: Прописать менеджера и группу в ossec.conf
-      blockinfile:
+    - name: Проверка наличия ossec.conf
+      stat:
         path: /var/ossec/etc/ossec.conf
-        marker: ""
-        insertafter: "<client>"
-        block: |
-          <server>
-            <address>{{ wazuh_manager }}</address>
-          </server>
+      register: wazuh_conf_check
+
+    - name: Fail если конфиг не найден
+      fail:
+        msg: "Wazuh agent не установлен! ossec.conf отсутствует!"
+      when: not wazuh_conf_check.stat.exists
+
+    - name: Заменить блок <client> в ossec.conf
+      replace:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<client>.*?</client>'
+        replace: |
           <client>
+            <server>
+              <address>{{ wazuh_manager }}</address>
+            </server>
             <group>{{ wazuh_agent_group }}</group>
           </client>
+        backup: yes
 
-    - name: Перезапустить systemd
+    - name: Перезапуск systemd
       systemd:
         daemon_reload: true
 
@@ -68,12 +79,26 @@
       systemd:
         name: wazuh-agent
         state: started
+      register: wazuh_start
+      failed_when: wazuh_start.failed
 
-    - name: Проверка статуса агента
+    - name: Проверить статус wazuh-agent
       command: systemctl is-active wazuh-agent
       register: wazuh_status
       changed_when: false
 
-    - name: Показать статус
+    - name: Вывести статус
       debug:
-        msg: "Wazuh agent status: {{ wazuh_status.stdout }}"
+        msg: "Статус wazuh-agent: {{ wazuh_status.stdout }}"
+
+    - name: Показать логи wazuh-agent, если он не активен
+      when: wazuh_status.stdout != "active"
+      block:
+        - name: Собрать последние 50 логов
+          command: journalctl -u wazuh-agent --no-pager -n 50
+          register: wazuh_logs
+          ignore_errors: true
+
+        - name: Показать логи
+          debug:
+            msg: "{{ wazuh_logs.stdout_lines }}"
