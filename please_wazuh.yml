@@ -1,0 +1,87 @@
+---
+- name: Установка Wazuh Agent 4.10.1 (строго и без переменных окружения)
+  hosts: all
+  become: true
+
+  vars:
+    wazuh_manager: "192.168.112.160"
+    wazuh_group: "new.agents"
+    wazuh_version: "4.10.1-1"
+
+  tasks:
+    - name: Покажи инфу про ОС
+      ansible.builtin.debug:
+        msg: "Detected OS family: {{ ansible_facts['os_family'] }}, distribution: {{ ansible_facts['distribution'] }}"
+
+    - name: Скачать .deb
+      ansible.builtin.get_url:
+        url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_{{ wazuh_version }}_amd64.deb"
+        dest: "/tmp/wazuh-agent.deb"
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Установить .deb
+      ansible.builtin.command:
+        cmd: dpkg -i /tmp/wazuh-agent.deb
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - not ansible_facts['distribution'] is search("RED")
+
+    - name: Скачать .rpm
+      ansible.builtin.get_url:
+        url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-{{ wazuh_version }}.x86_64.rpm"
+        dest: "/tmp/wazuh-agent.rpm"
+      when: ansible_facts['os_family'] in ['RedHat', 'Red', 'RED', 'RedOS', 'Linux']
+
+    - name: Установить .rpm
+      ansible.builtin.command:
+        cmd: "rpm -ihv /tmp/wazuh-agent.rpm"
+      register: rpm_result
+      failed_when: rpm_result.rc != 0 and 'уже установлен' not in rpm_result.stderr
+      when: ansible_facts['os_family'] in ['RedHat', 'Red', 'RED', 'RedOS', 'Linux']
+
+    - name: Проверка наличия ossec.conf
+      ansible.builtin.stat:
+        path: /var/ossec/etc/ossec.conf
+      register: wazuh_conf_check
+
+    - name: Fail если конфиг не найден
+      ansible.builtin.fail:
+        msg: "ossec.conf не найден после установки wazuh-agent"
+      when: not wazuh_conf_check.stat.exists
+
+    # TEST
+    - name: Заменить блок <client> в ossec.conf
+      ansible.builtin.replace:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<client>.*?</client>'
+        replace: |
+          <client>
+            <server>
+              <address>{{ wazuh_manager }}</address>
+              <port>1514</port>
+              <protocol>tcp</protocol>
+            </server>
+            <config-profile>{{ wazuh_group }}</config-profile>
+            <notify_time>10</notify_time>
+            <time-reconnect>60</time-reconnect>
+            <auto_restart>yes</auto_restart>
+            <crypto_method>aes</crypto_method>
+          </client>
+        backup: true
+  
+
+    - name: Перезапуск systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Включить автозапуск wazuh-agent
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        enabled: true
+
+    - name: Запустить wazuh-agent
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: started
+      register: wazuh_start
+      failed_when: wazuh_start.failed or wazuh_start.status.ActiveState != 'active'
