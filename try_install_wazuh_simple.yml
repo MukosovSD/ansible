@@ -1,94 +1,81 @@
 ---
-- name: Установка Wazuh Agent 4.10.1 на Ubuntu и RedOS
-  hosts: all
+- name: Install Wazuh Agent on Linux (RedOS + Ubuntu)
+  hosts: 	test_deploy_wazuh_agent
   become: true
   vars:
-    wazuh_manager: "192.168.112.160"
-    wazuh_agent_group: "new.agents"
-    wazuh_rpm_url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-4.10.1-1.x86_64.rpm"
-    wazuh_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.10.1-1_amd64.deb"
-    wazuh_rpm_path: "/tmp/wazuh-agent.rpm"
-    wazuh_deb_path: "/tmp/wazuh-agent.deb"
-
+    wazuh_version: "4.10.1"
+    wazuh_manager: "{{ lookup('env', 'WAZUH_MANAGER') | default('192.168.112.160') }}"
+    wazuh_agent_group: "{{ lookup('env', 'WAZUH_AGENT_GROUP') | default('new.agents') }}"
   tasks:
-    - name: Установка curl для Ubuntu
-      apt:
-        name: curl
-        update_cache: yes
-        state: present
+
+    - name: Gather facts
+      setup:
+
+    - name: Check OS family
+      ansible.builtin.debug:
+        msg: "Detected OS family: {{ ansible_os_family }}, distribution: {{ ansible_distribution }}"
+
+    - name: Install Wazuh Agent on RedHat/RedOS
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: Download Wazuh RPM manually
+          get_url:
+            url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-{{ wazuh_version }}-1.x86_64.rpm"
+            dest: "/tmp/wazuh-agent.rpm"
+
+        - name: Install Wazuh Agent with env vars
+          ansible.builtin.command: >
+            rpm -ihv /tmp/wazuh-agent.rpm
+          environment:
+            WAZUH_MANAGER: "{{ wazuh_manager }}"
+            WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
+          args:
+            creates: /var/ossec
+
+    - name: Install Wazuh Agent on Debian/Ubuntu
       when: ansible_os_family == "Debian"
+      block:
+        - name: Download and install Wazuh APT key
+          apt_key:
+            url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+            state: present
 
-    - name: Установка curl для RedOS
-      yum:
-        name: curl
-        state: present
-      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
+        - name: Add Wazuh APT repo
+          apt_repository:
+            repo: "deb https://packages.wazuh.com/4.x/apt/ stable main"
+            state: present
 
-    - name: Скачать DEB-пакет wazuh-agent для Ubuntu
-      command: wget -O {{ wazuh_deb_path }} {{ wazuh_deb_url }}
-      when: ansible_os_family == "Debian"
+        - name: Update apt cache
+          apt:
+            update_cache: true
 
-    - name: Установить wazuh-agent на Ubuntu
-      command: dpkg -i {{ wazuh_deb_path }}
-      environment:
-        WAZUH_MANAGER: "{{ wazuh_manager }}"
-        WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
-      when: ansible_os_family == "Debian"
-      ignore_errors: true
+        - name: Install Wazuh Agent with env
+          apt:
+            name: wazuh-agent
+            state: present
+          environment:
+            WAZUH_MANAGER: "{{ wazuh_manager }}"
+            WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
 
-    - name: Скачать RPM-пакет wazuh-agent для RedOS
-      command: curl -o {{ wazuh_rpm_path }} {{ wazuh_rpm_url }}
-      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
-
-    - name: Установить wazuh-agent на RedOS
-      command: rpm -ihv --replacepkgs {{ wazuh_rpm_path }}
-      environment:
-        WAZUH_MANAGER: "{{ wazuh_manager }}"
-        WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
-      when: ansible_os_family == "RedHat" or ansible_distribution == "RED"
-      ignore_errors: true
-
-    - name: Настройка адреса Wazuh Manager в ossec.conf
-      lineinfile:
-        path: /var/ossec/etc/ossec.conf
-        regexp: '<address>.*</address>'
-        line: "<address>{{ wazuh_manager }}</address>"
-        backup: yes
-      when: ansible_os_family in ["Debian", "RedHat"] or ansible_distribution == "RED"
-
-    - name: Настройка группы агента в ossec.conf
-      blockinfile:
-        path: /var/ossec/etc/ossec.conf
-        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK wazuh-agent group -->"
-        block: |
-          <client>
-            <enrollment>
-              <enabled>yes</enabled>
-              <groups>{{ wazuh_agent_group }}</groups>
-            </enrollment>
-          </client>
-        insertafter: "</client>"
-        backup: yes
-      when: ansible_os_family in ["Debian", "RedHat"] or ansible_distribution == "RED"
-
-    - name: Перезагрузка systemd
+    - name: Reload systemd
       systemd:
         daemon_reload: true
 
-    - name: Включение и запуск агента Wazuh
+    - name: Enable wazuh-agent service
       systemd:
         name: wazuh-agent
         enabled: true
+
+    - name: Start wazuh-agent service
+      systemd:
+        name: wazuh-agent
         state: started
-      ignore_errors: true
 
-    - name: Проверка статуса wazuh-agent
-      command: systemctl status wazuh-agent
-      register: agent_status
+    - name: Check wazuh-agent status
+      command: systemctl is-active wazuh-agent
+      register: wazuh_status
       changed_when: false
-      failed_when: false
 
-    - name: Вывод статуса wazuh-agent
+    - name: Print agent status
       debug:
-        msg: "{{ agent_status.stdout_lines }}"
-      when: agent_status.stdout is defined
+        msg: "Wazuh agent status: {{ wazuh_status.stdout }}"
