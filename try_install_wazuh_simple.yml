@@ -1,81 +1,79 @@
 ---
-- name: Install Wazuh Agent on Linux (RedOS + Ubuntu)
-  hosts: 	test_deploy_wazuh_agent
+- name: Установка Wazuh Agent 4.10.1 (жестко, без переменных)
+  hosts: all
   become: true
+
   vars:
     wazuh_version: "4.10.1"
-    wazuh_manager: "{{ lookup('env', 'WAZUH_MANAGER') | default('192.168.112.160') }}"
-    wazuh_agent_group: "{{ lookup('env', 'WAZUH_AGENT_GROUP') | default('new.agents') }}"
-  tasks:
+    wazuh_manager: "192.168.112.160"
+    wazuh_agent_group: "new.agents"
+    wazuh_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_{{ wazuh_version }}-1_amd64.deb"
+    wazuh_rpm_url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-{{ wazuh_version }}-1.x86_64.rpm"
 
-    - name: Gather facts
+  tasks:
+    - name: Собираем факты
       setup:
 
-    - name: Check OS family
-      ansible.builtin.debug:
-        msg: "Detected OS family: {{ ansible_os_family }}, distribution: {{ ansible_distribution }}"
-
-    - name: Install Wazuh Agent on RedHat/RedOS
-      when: ansible_os_family == "RedHat"
+    - name: Установка на Ubuntu/Debian через .deb
+      when: ansible_facts['os_family'] == "Debian"
       block:
-        - name: Download Wazuh RPM manually
+        - name: Скачать .deb
           get_url:
-            url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-{{ wazuh_version }}-1.x86_64.rpm"
-            dest: "/tmp/wazuh-agent.rpm"
+            url: "{{ wazuh_deb_url }}"
+            dest: "/tmp/wazuh-agent.deb"
+            mode: '0644'
 
-        - name: Install Wazuh Agent with env vars
-          ansible.builtin.command: >
-            rpm -ihv /tmp/wazuh-agent.rpm
-          environment:
-            WAZUH_MANAGER: "{{ wazuh_manager }}"
-            WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
+        - name: Установить .deb
+          command: "dpkg -i /tmp/wazuh-agent.deb"
           args:
             creates: /var/ossec
 
-    - name: Install Wazuh Agent on Debian/Ubuntu
-      when: ansible_os_family == "Debian"
+    - name: Установка на RedOS/RHEL через .rpm
+      when: ansible_facts['os_family'] == "RedHat"
       block:
-        - name: Download and install Wazuh APT key
-          apt_key:
-            url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
-            state: present
+        - name: Скачать .rpm
+          get_url:
+            url: "{{ wazuh_rpm_url }}"
+            dest: "/tmp/wazuh-agent.rpm"
+            mode: '0644'
 
-        - name: Add Wazuh APT repo
-          apt_repository:
-            repo: "deb https://packages.wazuh.com/4.x/apt/ stable main"
-            state: present
+        - name: Установить .rpm
+          command: "rpm -ihv /tmp/wazuh-agent.rpm"
+          args:
+            creates: /var/ossec
 
-        - name: Update apt cache
-          apt:
-            update_cache: true
+    - name: Прописать менеджера и группу в ossec.conf
+      blockinfile:
+        path: /var/ossec/etc/ossec.conf
+        marker: ""
+        insertafter: "<client>"
+        block: |
+          <server>
+            <address>{{ wazuh_manager }}</address>
+          </server>
+          <client>
+            <group>{{ wazuh_agent_group }}</group>
+          </client>
 
-        - name: Install Wazuh Agent with env
-          apt:
-            name: wazuh-agent
-            state: present
-          environment:
-            WAZUH_MANAGER: "{{ wazuh_manager }}"
-            WAZUH_AGENT_GROUP: "{{ wazuh_agent_group }}"
-
-    - name: Reload systemd
+    - name: Перезапустить systemd
       systemd:
         daemon_reload: true
 
-    - name: Enable wazuh-agent service
+    - name: Включить автозапуск wazuh-agent
       systemd:
         name: wazuh-agent
         enabled: true
 
-    - name: Start wazuh-agent service
+    - name: Запустить wazuh-agent
       systemd:
         name: wazuh-agent
         state: started
 
-    - name: Check wazuh-agent status
+    - name: Проверка статуса агента
       command: systemctl is-active wazuh-agent
       register: wazuh_status
       changed_when: false
 
-    - name: Print agent status
+    - name: Показать статус
       debug:
         msg: "Wazuh agent status: {{ wazuh_status.stdout }}"
