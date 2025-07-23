@@ -1,0 +1,73 @@
+---
+- name: Полная чистка osquery
+  hosts: all
+  become: true
+  tasks:
+
+    - name: Gather minimal facts
+      ansible.builtin.setup:
+        gather_subset: min
+
+    - name: Остановить osqueryd
+      ansible.builtin.systemd:
+        name: osqueryd
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Удалить osquery пакет (DEB)
+      ansible.builtin.apt:
+        name: osquery
+        state: absent
+        purge: yes
+      when: ansible_facts['os_family'] == 'Debian'
+      ignore_errors: true
+
+    - name: Удалить osquery пакет (RPM)
+      ansible.builtin.yum:
+        name: osquery
+        state: absent
+      when: ansible_facts['os_family'] in ['RedHat', 'RedOS', 'RED', 'Linux']
+      ignore_errors: true
+
+    - name: Удалить /etc/init.d/osqueryd (если есть)
+      ansible.builtin.file:
+        path: /etc/init.d/osqueryd
+        state: absent
+
+    - name: Удалить systemd unit osqueryd
+      ansible.builtin.file:
+        path: /usr/lib/systemd/system/osqueryd.service
+        state: absent
+      ignore_errors: true
+
+    - name: Удалить бинарники osqueryd и osqueryi
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/bin/osqueryd
+        - /usr/bin/osqueryi
+        - /usr/local/bin/osqueryd
+        - /usr/local/bin/osqueryi
+      ignore_errors: true
+
+    - name: Удалить конфиги и каталоги osquery
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/osquery
+        - /var/log/osquery
+        - /var/osquery
+        - /opt/osquery
+        - /usr/share/osquery
+        - /var/lib/osquery
+        - /usr/local/etc/osquery
+      ignore_errors: true
+
+    - name: Выполнить systemctl daemon-reexec
+      ansible.builtin.command: systemctl daemon-reexec
+
+    - name: Сбросить systemctl failed
+      ansible.builtin.command: systemctl reset-failed
