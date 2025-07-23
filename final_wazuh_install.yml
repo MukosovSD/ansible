@@ -1,1 +1,153 @@
+---
+- name: Установка Wazuh Agent 4.10.1 (строго и без переменных окружения)
+  hosts: all
+  become: true
 
+  vars:
+    wazuh_manager: "192.168.112.160"
+    wazuh_version: "4.10.1-1"
+
+  tasks:
+    - name: Покажи инфу про ОС
+      ansible.builtin.debug:
+        msg: "Detected OS family: {{ ansible_facts['os_family'] }}, distribution: {{ ansible_facts['distribution'] }}"
+
+    - name: Скачать .deb
+      ansible.builtin.get_url:
+        url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_{{ wazuh_version }}_amd64.deb"
+        dest: "/tmp/wazuh-agent.deb"
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Установить .deb
+      ansible.builtin.command:
+        cmd: dpkg -i /tmp/wazuh-agent.deb
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - not ansible_facts['distribution'] is search("RED")
+
+    - name: Скачать .rpm
+      ansible.builtin.get_url:
+        url: "https://packages.wazuh.com/4.x/yum/wazuh-agent-{{ wazuh_version }}.x86_64.rpm"
+        dest: "/tmp/wazuh-agent.rpm"
+      when: ansible_facts['os_family'] in ['RedHat', 'Red', 'RED', 'RedOS', 'Linux']
+
+    - name: Установить .rpm
+      ansible.builtin.command:
+        cmd: "rpm -ihv /tmp/wazuh-agent.rpm"
+      register: rpm_result
+      failed_when: rpm_result.rc != 0 and 'уже установлен' not in rpm_result.stderr
+      when: ansible_facts['os_family'] in ['RedHat', 'Red', 'RED', 'RedOS', 'Linux']
+
+    - name: Проверка наличия ossec.conf
+      ansible.builtin.stat:
+        path: /var/ossec/etc/ossec.conf
+      register: wazuh_conf_check
+
+    - name: Fail если конфиг не найден
+      ansible.builtin.fail:
+        msg: "ossec.conf не найден после установки wazuh-agent"
+      when: not wazuh_conf_check.stat.exists
+
+    - name: Удалить старый блок <client> из ossec.conf
+      ansible.builtin.replace:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<client>\s*(?:.|\n)*?</client>\s*'
+        replace: ''
+        backup: true
+      when: wazuh_conf_check.stat.exists
+
+    # ИЗМЕНЕНО: Вставляем блок <client> с <enrollment> для всех ОС
+    - name: Вставить блок <client> в первый <ossec_config> в ossec.conf
+      ansible.builtin.blockinfile:
+        path: /var/ossec/etc/ossec.conf
+        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK client -->"
+        insertafter: "^<ossec_config>"
+        block: |
+          <client>
+            <server>
+              <address>{{ wazuh_manager }}</address>
+              <port>1514</port>
+              <protocol>tcp</protocol>
+            </server>
+            <config-profile>{{ 'ubuntu, ubuntu24, ubuntu24.04' if ansible_facts['os_family'] == 'Debian' else 'redos, redos7, redos7.3' }}</config-profile>
+            <notify_time>10</notify_time>
+            <time-reconnect>60</time-reconnect>
+            <auto_restart>yes</auto_restart>
+            <crypto_method>aes</crypto_method>
+            <enrollment>
+              <enabled>yes</enabled>
+              <groups>new.agents</groups>
+              <authorization_pass_path>etc/authd.pass</authorization_pass_path>
+            </enrollment>
+          </client>
+        backup: true
+      when: wazuh_conf_check.stat.exists
+    # КОНЕЦ ИЗМЕНЕНИЯ
+
+    # ИЗМЕНЕНО: Проверяем значение config-profile и groups
+    - name: Проверить значение config-profile
+      ansible.builtin.command:
+        cmd: grep -o "<config-profile>.*</config-profile>" /var/ossec/etc/ossec.conf
+      register: config_profile_check
+      changed_when: false
+      when: wazuh_conf_check.stat.exists
+
+    - name: Отладочный вывод config-profile
+      ansible.builtin.debug:
+        msg: "Config-profile: {{ config_profile_check.stdout }}"
+      when: wazuh_conf_check.stat.exists
+
+    - name: Проверить значение groups
+      ansible.builtin.command:
+        cmd: grep -o "<groups>new.agents</groups>" /var/ossec/etc/ossec.conf
+      register: groups_check
+      failed_when: groups_check.rc != 0
+      changed_when: false
+      when: wazuh_conf_check.stat.exists
+    # КОНЕЦ ИЗМЕНЕНИЯ
+
+    - name: Проверить, что wazuh_manager подставлен в ossec.conf
+      ansible.builtin.command:
+        cmd: grep -q "<address>{{ wazuh_manager }}</address>" /var/ossec/etc/ossec.conf
+      register: grep_manager_ip
+      failed_when: grep_manager_ip.rc != 0
+      changed_when: false
+      when: wazuh_conf_check.stat.exists
+
+    - name: Проверить, что MANAGER_IP отсутствует в ossec.conf
+      ansible.builtin.command:
+        cmd: grep -q "MANAGER_IP" /var/ossec/etc/ossec.conf
+      register: grep_invalid_ip
+      failed_when: grep_invalid_ip.rc == 0
+      changed_when: false
+      when: wazuh_conf_check.stat.exists
+
+    - name: Показать содержимое ossec.conf
+      ansible.builtin.command:
+        cmd: cat /var/ossec/etc/ossec.conf
+      register: ossec_conf_content
+      changed_when: false
+      when: wazuh_conf_check.stat.exists
+
+    - name: Отладочный вывод ossec.conf
+      ansible.builtin.debug:
+        msg: "{{ ossec_conf_content.stdout_lines }}"
+      when: wazuh_conf_check.stat.exists
+
+    - name: Перезапуск systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Включить автозапуск wazuh-agent
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        enabled: true
+
+    - name: Запустить wazuh-agent
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: started
+      register: wazuh_start
+      retries: 3
+      delay: 5
+      until: wazuh_start is success and wazuh_start.status.ActiveState == 'active'
