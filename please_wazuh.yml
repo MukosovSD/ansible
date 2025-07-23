@@ -37,7 +37,7 @@
         cmd: "rpm -ihv /tmp/wazuh-agent.rpm"
       register: rpm_result
       failed_when: rpm_result.rc != 0 and 'уже установлен' not in rpm_result.stderr
-      when: ansible_facts['os_family'] in ['RedHat', 'Red', 'RED', 'RedOS', 'Linux']
+      when: ansible_facts['os_family'] in ['RedHat', 'качать', 'RED', 'RedOS', 'Linux']
 
     - name: Проверка наличия ossec.conf
       ansible.builtin.stat:
@@ -49,58 +49,57 @@
         msg: "ossec.conf не найден после установки wazuh-agent"
       when: not wazuh_conf_check.stat.exists
 
-    # ИЗМЕНЕНО: Используем blockinfile для точной вставки блока <client>
-    - name: Вставить блок <client> в ossec.conf для RedOS
-      ansible.builtin.blockinfile:
+    # ИЗМЕНЕНО: Удаляем существующий блок <client>
+    - name: Удалить старый блок <client> из ossec.conf
+      ansible.builtin.replace:
         path: /var/ossec/etc/ossec.conf
-        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK client -->"
-        insertafter: "<ossec_config>"
-        block: |
-          <client>
-            <server>
-              <address>{{ wazuh_manager }}</address>
-              <port>1514</port>
-              <protocol>tcp</protocol>
-            </server>
-            <config-profile>redos, redos7, redos7.3</config-profile>
-            <notify_time>10</notify_time>
-            <time-reconnect>60</time-reconnect>
-            <auto_restart>yes</auto_restart>
-            <crypto_method>aes</crypto_method>
-          </client>
+        regexp: '<client>.*?</client>'
+        replace: ''
         backup: true
-      when: ansible_facts['os_family'] in ['Red', 'RED', 'RedOS']
-
-    - name: Вставить блок <client> в ossec.conf для других ОС
-      ansible.builtin.blockinfile:
-        path: /var/ossec/etc/ossec.conf
-        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK client -->"
-        insertafter: "<ossec_config>"
-        block: |
-          <client>
-            <server>
-              <address>{{ wazuh_manager }}</address>
-              <port>1514</port>
-              <protocol>tcp</protocol>
-            </server>
-            <config-profile>{{ wazuh_group }}</config-profile>
-            <notify_time>10</notify_time>
-            <time-reconnect>60</time-reconnect>
-            <auto bilgisayar: true
-            <crypto_method>aes</crypto_method>
-          </client>
-        backup: true
-      when: ansible_facts['os_family'] not in ['Red', 'RED', 'RedOS']
+      when: wazuh_conf_check.stat.exists
     # КОНЕЦ ИЗМЕНЕНИЯ
 
-    # ИЗМЕНЕНО: Добавляем проверку содержимого ossec.conf
+    # ИЗМЕНЕНО: Используем template для вставки блока <client>
+    - name: Создать шаблон для блока <client>
+      ansible.builtin.template:
+        src: templates/client.conf.j2
+        dest: /tmp/client.conf
+        mode: '0644'
+      vars:
+        config_profile: "{{ 'redos, redos7, redos7.3' if ansible_facts['os_family'] in ['Red', 'RED', 'RedOS'] else wazuh_group }}"
+      delegate_to: localhost
+
+    - name: Вставить блок <client> в ossec.conf
+      ansible.builtin.blockinfile:
+        path: /var/ossec/etc/ossec.conf
+        marker: "<!-- {mark} ANSIBLE MANAGED BLOCK client -->"
+        insertafter: "<ossec_config>"
+        content: "{{ lookup('file', '/tmp/client.conf') }}"
+        backup: true
+      when: wazuh_conf_check.stat.exists
+    # КОНЕЦ ИЗМЕНЕНИЯ
+
+    # ИЗМЕНЕНО: Добавляем отладочный вывод содержимого ossec.conf
+    - name: Показать содержимое ossec.conf
+      ansible.builtin.command:
+        cmd: cat /var/ossec/etc/ossec.conf
+      register: ossec_conf_content
+      changed_when: false
+      when: wazuh_conf_check.stat.exists
+
+    - name: Отладочный вывод ossec.conf
+      ansible.builtin.debug:
+        msg: "{{ ossec_conf_content.stdout_lines }}"
+      when: wazuh_conf_check.stat.exists
+    # КОНЕЦ ИЗМЕНЕНИЯ
+
     - name: Проверить, что MANAGER_IP отсутствует в ossec.conf
       ansible.builtin.command:
         cmd: grep -q "MANAGER_IP" /var/ossec/etc/ossec.conf
-      register: grep_manager_ip
+      register: grepflip_ip
       failed_when: grep_manager_ip.rc == 0
       changed_when: false
-    # КОНЕЦ ИЗМЕНЕНИЯ
+      when: wazuh_conf_check.stat.exists
 
     - name: Перезапуск systemd
       ansible.builtin.systemd:
@@ -111,7 +110,6 @@
         name: wazuh-agent
         enabled: true
 
-    # ИЗМЕНЕНО: Улучшаем задачу запуска службы с повторной попыткой
     - name: Запустить wazuh-agent
       ansible.builtin.systemd:
         name: wazuh-agent
@@ -120,4 +118,3 @@
       retries: 3
       delay: 5
       until: wazuh_start is success and wazuh_start.status.ActiveState == 'active'
-    # КОНЕЦ ИЗМЕНЕНИЯ
