@@ -1,24 +1,24 @@
----
-- name: Install lxml 
-  apt:
-    name: python3-lxml
-    state: present
+#---
+#- name: Install lxml 
+#  apt:
+#    name: python3-lxml
+#    state: present
+#
+#- name: Test XML 1
+#  community.general.xml:
+#    path: /var/ossec/etc/ossec.conf
+#   xpath: /ossec_config/wodle[@name='osquery']/disabled    
+#    value: 'no'
 
-- name: Test XML 1
-  community.general.xml:
-    path: /var/ossec/etc/ossec.conf
-    xpath: /ossec_config/wodle[@name='osquery']/disabled    
-    value: 'no'
-
-- name: Test XML 2
-  community.general.xml:
-    path: /var/ossec/etc/ossec.conf
-    xpath: /ossec_config/wodle[@name='osquery']/run_daemon    
-    value: 'no'
-#- name: Begin wazuh Debian deployment
-#  include_tasks: Debian.yml 
-#  when: ansible_facts['os_family'] == "Debian"
-#   
-#- name: Begin wazuh RHEL deployment  
-#  include_tasks: RHEL.yml
-#  when: ansible_facts['os_family'] == "RedHat"
+#- name: Test XML 2
+#  community.general.xml:
+#    path: /var/ossec/etc/ossec.conf
+#    xpath: /ossec_config/wodle[@name='osquery']/run_daemon    
+#    value: 'no'
+- name: Begin wazuh Debian deployment
+  include_tasks: Debian.yml 
+  when: ansible_facts['os_family'] == "Debian"
+   
+- name: Begin wazuh RHEL deployment  
+  include_tasks: RHEL.yml
+  when: ansible_facts['os_family'] == "RED"
