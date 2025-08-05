@@ -1,0 +1,89 @@
+---
+#Debian-Based OS
+- name: Delete already installed osquery or fleet-osquery
+  apt: name={{item}} state=absent
+  loop:
+    - osquery
+    - fleet-osquery
+
+- name: Add OSQuery repository and GPG key
+  block:
+    - name: Add an Apt signing key
+      apt_key:
+        url: https://pkg.osquery.io/deb/pubkey.gpg
+        state: present
+
+    - name: Add Osquery repo
+      apt_repository:
+        repo: "deb https://pkg.osquery.io/deb deb main"
+        state: present
+
+- name: Install OSQuery package
+  apt: update_cache=yes name=osquery state=latest 
+
+- name: Copy osquery files
+  copy:
+    src: '{{item}}'
+    dest: '/etc/osquery'
+    owner: root
+    group: root
+    mode: 0640
+  loop:
+    - osquery.conf
+    - osquery.flags
+    - fleet.pem
+    - enroll_secret  
+
+- name: Copy certificates to trusted
+  copy:
+    src: '{{item}}'
+    dest: '/usr/local/share/ca-certificates'
+    owner: root
+    group: root
+    mode: 0644
+  loop:
+    - fleet.pem
+    - GitlabRootCA.crt 
+
+- name: Update ca-certificates
+  shell: /usr/sbin/update-ca-certificates   
+
+#- name: Prepare for osquery process events integration / Get auditd process
+#  community.general.pids: name=auditd
+#  register: auditd_pid
+
+#- name: Install auditd package
+#  apt: update_cache=yes name=auditd state=latest 
+
+#- name: Prepare for osquery process events integration / Kill auditd process
+# shell: "pkill -x auditd"
+
+#- name: Prepare for osquery process events integration / Stop auditd service 
+#  service: name=auditd state=stopped enabled=no
+
+- name: Prepare audit directory if doesnt exist
+  file:
+    path: '{{ item.dir }}'
+    state: directory
+    mode: '0755' 
+  loop:
+    - { dir: /etc/audit }
+    - { dir: /etc/audit/rules.d }
+    
+- name: Prepare for osquery process events integration / Copy auditd files
+  copy:
+    src: '{{item}}'
+    dest: '/etc/audit'
+    owner: root
+    group: root
+    mode: 0640
+  loop:
+    - audit-stop.rules
+    - audit.rules
+    - auditd.conf
+
+- name: Copy auditd rules.d file
+  copy: src=audit.rules dest=/etc/audit/rules.d/audit.rules owner=root group=root mode='0640'
+
+- name: Start osquery service
+  service: name=osqueryd state=started enabled=yes

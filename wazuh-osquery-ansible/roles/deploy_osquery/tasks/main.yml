@@ -1,0 +1,8 @@
+---
+- name: Begin Osquery Debian deployment
+  include_tasks: Debian.yml 
+  when: ansible_facts['os_family'] == "Debian"
+    
+- name: Begin Osquery RHEL deployment  
+  include_tasks: RHEL.yml
+  when: ansible_facts['os_family'] == "RedHat"

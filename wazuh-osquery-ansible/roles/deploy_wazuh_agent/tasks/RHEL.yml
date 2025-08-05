@@ -1,0 +1,45 @@
+---
+#RHEL
+- name: Delete already installed wazuh
+  yum: name={{item}} state=absent
+  loop:
+    - wazuh-agent
+
+- name: Add Wazuh repository
+  copy: src=wazuh.repo dest=/etc/yum.repos.d/wazuh.repo owner=root group=root mode='0644'
+
+- name: Add Wazuh repository GPG key
+  copy: src=GPG-KEY-WAZUH dest=/etc/pki/rpm-gpg/GPG-KEY-WAZUH owner=root group=root mode='0644'
+
+- name: Install Wazuh package
+  yum: 
+    name: wazuh-agent-4.10.1-1.x86_64 
+    state: present 
+  environment:
+    WAZUH_MANAGER: "192.168.112.160"
+      
+- name: Replace a osquery disabling parameter
+  lineinfile:
+    path: /var/ossec/etc/ossec.conf
+    search_string: '<disabled>yes'
+    line: '    <disabled>no</disabled>'
+    owner: root
+    group: wazuh
+    mode: '0660'
+    firstmatch: yes
+
+- name: Replace a osquery daemon enabling parameter
+  lineinfile:
+    path: /var/ossec/etc/ossec.conf
+    search_string: '<run_daemon>yes</run_daemon>'
+    line: '    <run_daemon>no</run_daemon>'
+    owner: root
+    group: wazuh
+    mode: '0660'
+    firstmatch: yes
+
+#- name: Copy Wazuh configuration file 
+# copy: src=ossec.conf dest=/var/ossec/etc/ossec.conf owner=root group=wazuh mode='0660'
+
+- name: Start wazuh-agent
+  service: name=wazuh-agent state=started enabled=yes

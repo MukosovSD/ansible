@@ -1,0 +1,54 @@
+---
+#RHEL
+#Debian-Based OS
+- name: Delete already installed wazuh-agent
+  apt: name={{item}} state=absent
+  loop:
+    - wazuh-agent
+
+- name: Add Wazuh repository and GPG key
+  block:
+    - name: Add an Apt signing key
+      apt_key:
+        url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        state: present
+
+    - name: Add wazuh repo
+      apt_repository:
+        filename: wazuh-repo
+        repo: "deb https://packages.wazuh.com/4.x/apt/ stable main"
+        state: present
+
+- name: Install Wazuh package
+  apt: 
+    update_cache: yes
+    name: wazuh-agent=4.10.1-1
+    state: present 
+  environment:
+    WAZUH_MANAGER: "192.168.112.160"
+
+- name: Replace a osquery disabling parameter
+  lineinfile:
+    path: /var/ossec/etc/ossec.conf
+    regexp: '<wodle name="osquery">\n.*<disabled>yes</disabled>'
+    line: '    <disabled>no</disabled>'
+    owner: root
+    group: wazuh
+    mode: '0660'
+    firstmatch: yes
+
+- name: Replace a osquery daemon enabling parameter
+  lineinfile:
+    path: /var/ossec/etc/ossec.conf
+    search_string: '<run_daemon>yes</run_daemon>'
+    line: '    <run_daemon>no</run_daemon>'
+    owner: root
+    group: wazuh
+    mode: '0660'
+    firstmatch: yes
+
+#- name: Copy Wazuh configuration file 
+#  copy: src=ossec.conf dest=/var/ossec/etc/ossec.conf owner=root group=wazuh mode='0660'
+
+- name: Start wazuh-agent
+  service: name=wazuh-agent state=started enabled=yes

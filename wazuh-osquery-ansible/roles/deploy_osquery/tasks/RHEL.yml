@@ -1,0 +1,69 @@
+---
+#RHEL-Based OS
+- name: Delete already installed osquery or fleet-osquery
+  yum: name={{item}} state=absent
+  loop:
+    - osquery
+    - fleet-osquery
+
+
+- name: Add OSQuery repository
+  copy: src=osquery.repo dest=/etc/yum.repos.d/osquery.repo owner=root group=root mode='0644'
+
+- name: Add OSQuery repository GPG key
+  copy: src=RPM-GPG-KEY-osquery dest=/etc/pki/rpm-gpg/RPM-GPG-KEY-osquery owner=root group=root mode='0644'
+
+- name: Install OSQuery package
+  yum: name=osquery state=present
+
+- name: Copy osquery files
+  copy:
+    src: '{{item}}'
+    dest: '/etc/osquery'
+    owner: root
+    group: root
+    mode: 0640
+  loop:
+    - osquery.conf
+    - osquery.flags
+    - fleet.pem
+    - enroll_secret  
+
+- name: Copy certificates to trusted
+  copy:
+    src: '{{item}}'
+    dest: '/etc/pki/ca-trust/source/anchor'
+    owner: root
+    group: root
+    mode: 0640
+  loop:
+    - fleet.pem
+    - GitlabRootCA.crt    
+
+#- name: Prepare for osquery process events integration / Get auditd process
+#  community.general.pids: name=auditd
+#  register: auditd_pid
+
+- name: Prepare for osquery process events integration / Kill auditd process
+  shell: "pkill -x auditd"
+
+- name: Prepare for osquery process events integration / Stop auditd service
+  service: name=auditd state=stopped enabled=no
+
+- name: Prepare for osquery process events integration / Copy auditd files
+  copy:
+    src: '{{item}}'
+    dest: '/etc/audit'
+    owner: root
+    group: root
+    mode: 0640
+  loop:
+    - audit-stop.rules
+    - audit.rules
+    - auditd.conf
+
+- name: Copy auditd rules.d file
+  copy: src=audit.rules dest=/etc/audit/rules.d/audit.rules owner=root group=root mode='0640'
+
+- name: Start osquery service
+  service: name=osqueryd state=started enabled=yes
