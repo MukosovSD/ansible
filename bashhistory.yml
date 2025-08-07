@@ -3,40 +3,31 @@
   hosts: all
   become: yes
   vars:
-    # Список возможных путей к конфигурационным файлам
     config_files:
       - "/etc/bashrc"
       - "/etc/bash.bashrc"
       - "/etc/profile"
       - "{{ ansible_env.HOME }}/.bashrc"
       - "{{ ansible_env.HOME }}/.bash_profile"
-
-    # Для конкретного пользователя (если нужно) — раскомментировать и указать
-    # user_home: "/home/myuser"
-    # config_files:
-    #   - "{{ user_home }}/.bashrc"
-    #   - "{{ user_home }}/.bash_profile"
-
     prompt_command_line: 'PROMPT_COMMAND="history -a; history -n"'
 
   tasks:
     - name: Определить, какие из конфигурационных файлов существуют и доступны для записи
       stat:
         path: "{{ item }}"
-        follow: yes  # следует симлинкам
+        follow: yes
       register: file_stat
       loop: "{{ config_files }}"
-      check_mode: no
 
-    - name: Добавить PROMPT_COMMAND в конец каждого существующего файла
+    - name: Добавить PROMPT_COMMAND в конец каждого существующего и доступного для записи файла
       lineinfile:
         path: "{{ item.item }}"
-        line: "{{ prompt_command_line }}"
+        line: '{{ prompt_command_line }}'
         insertafter: EOF
         state: present
-        backup: yes  # ⚠️ Важно: делает бэкап с расширением .bak
-        create: no   # не создавать файл, если его нет
-      loop: "{{ file_stat.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists', 'equalto', true) | list }}"
+        backup: yes
+        create: no
+      loop: "{{ file_stat.results }}"
       loop_control:
         loop_var: item
-      when: item.stat and item.stat.exists and item.stat.writable
+      when: item.stat is defined and item.stat.exists and item.stat.writeable
