@@ -1,5 +1,5 @@
 ---
-- name: Настроить PROMPT_COMMAND для bash history (универсально)
+- name: Настроить PROMPT_COMMAND без дублей (по содержанию команды)
   hosts: all
   become: yes
   vars:
@@ -9,25 +9,46 @@
       - "/etc/profile"
       - "{{ ansible_env.HOME }}/.bashrc"
       - "{{ ansible_env.HOME }}/.bash_profile"
-    prompt_command_line: 'PROMPT_COMMAND="history -a; history -n"'
+    desired_line: 'PROMPT_COMMAND="history -a; history -n"'
+
+    # Регулярное выражение: ищем любое присваивание PROMPT_COMMAND, содержащее "history -a; history -n"
+    history_pattern: |-
+      ^\s*PROMPT_COMMAND\s*=\s*(['"]?)\s*history\s*\-\s*a\s*;\s*history\s*\-\s*n\s*\1\s*;?\s*$
+  # Пояснение:
+  # ^\s*PROMPT_COMMAND\s*=\s*     → PROMPT_COMMAND= (с пробелами)
+  # (['"]?)                       → опциональная кавычка (одинарная или двойная)
+  # \s*history\s*-\s*a\s*;\s*history\s*-\s*n\s*  → "history -a; history -n" с пробелами
+  # \1                            → та же кавычка, что и в начале (закрывающая)
+  # ;?\s*$                        → опциональная точка с запятой и конец строки
 
   tasks:
-    - name: Определить, какие из конфигурационных файлов существуют и доступны для записи
+    - name: Проверить существование файлов
       stat:
         path: "{{ item }}"
         follow: yes
       register: file_stat
       loop: "{{ config_files }}"
 
-    - name: Добавить PROMPT_COMMAND в конец каждого существующего и доступного для записи файла
+    - name: Удалить ВСЕ строки с PROMPT_COMMAND, содержащие history -a; history -n
       lineinfile:
         path: "{{ item.item }}"
-        line: '{{ prompt_command_line }}'
+        state: absent
+        regexp: "{{ history_pattern }}"
+      loop: "{{ file_stat.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists', 'equalto', true) | list }}"
+      loop_control:
+        loop_var: item
+      when: item.stat.writeable
+      register: removal
+
+    - name: Добавить чистую строку PROMPT_COMMAND в конец файла
+      lineinfile:
+        path: "{{ item.item }}"
+        line: '{{ desired_line }}'
         insertafter: EOF
         state: present
         backup: yes
         create: no
-      loop: "{{ file_stat.results }}"
+      loop: "{{ file_stat.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists', 'equalto', true) | list }}"
       loop_control:
         loop_var: item
-      when: item.stat is defined and item.stat.exists and item.stat.writeable
+      when: item.stat.writeable
